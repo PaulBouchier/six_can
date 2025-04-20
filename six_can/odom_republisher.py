@@ -70,7 +70,7 @@ class OdomRepublisher(Node):
         # check if we missed an odom message
         now = self.get_clock().now().nanoseconds  # get the current time in nanoseconds
         time_since_odom_msg_ms = (now - self.last_odom_time) / 1e6
-        if (time_since_odom_msg_ms > 50):  # if more than rate since last odom message, log a warning
+        if (time_since_odom_msg_ms > 200):  # if more than rate since last odom message, log a warning
             self.get_logger().warn(
                 f"Missed odom message, time since last odom message: {time_since_odom_msg_ms:.2f} ms")
         # update the last odom time
