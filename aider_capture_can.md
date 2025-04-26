@@ -163,7 +163,17 @@ obscured by the can
 
 ## Low-level tasks
 
-These tasks are ordered from start to finish
+These tasks are ordered from start to finish.
+
+In these tasks:
+- "Set blank_fwd_sector" means call the /blank_fwd_sector with data=True
+- "Clear blank_fwd_sector" means call the /blank_fwd_sector with data=False
+- "Open jaws" means publish a value of 1050 to /servo
+- "Close jaws" means publish a value of 1400 to /servo
+- "Back up 0.15m" means call self.move_client.execute_move('drive_straight_odom', [-0.15']) as shown
+in the move_client example
+- "Rotate in place by x radians" means call self.move_client.execute_move('rotate_odom', [x]) where
+x must be a string containing the number of radians to rotate.
 
 1. Create CaptureCan class.
 
@@ -178,7 +188,7 @@ These tasks are ordered from start to finish
     goal_x=0.75, goal_y=0.3
     - MIRROR the provided Minimal Publisher to create a publisher which publishes
     messages of type 'example_interfaces/msg/Int32' to topic '/servo'
-    - Publish a value of 1050 to /servo. This opens the jaws.
+    - Open jaws
     - MIRROR the provided Minimal Subscriber to create a subscriber which subscribes
     to topic '/closest_range_bearing' and receives messages of type geometry_msgs/msg/Point.
     The callback of this subscriber should save the x value in a class variable 'range' and
@@ -186,10 +196,11 @@ These tasks are ordered from start to finish
     - MIRROR the provided Minimal Service client code to add a service client to
     the CaptureCan class. It will use the service '/blank_fwd_sector' with
     type 'example_interfaces/srv/SetBool'.
+    - Clear blank_fwd_sector
     - Instantiate Nav2Pose as nav
     - Create a state machine which will step through the steps described below
     to accomplish the high-level goal. 
-    - Define a method called 'start_capture()' which will start the capture sequence and
+    - Define a method called 'start_capture()' which will start the capture state machine and
     return True if it succeeds, False if it fails.
   - Outside the class definition add a ROS main() function which initializes
   ROS and creates the node and calls start_capture(). This is to test this part of the system.
@@ -209,11 +220,10 @@ Rotate to point at can, because initial position might not be pointing directly 
 
 ```aider
 - Create the 'ROTATE' state.
-- Get the bearing to the closest can and call<br>
-self.move_client.execute_move('rotate_odom', bearing)<br>
-to rotate the robot to point at the can.
-- When execute_move returns set the next state to 'IDLE' and return, passing the return
-value from execute_move() back to the caller
+- Get the bearing to the closest can
+- Rotate in place bearing radians. This causes the robot to point at the can.
+Note that bearing must be a string containing a float that represents the number of radians to rotate
+- If execute_move returns True, transition to 'SEEK2CAN', otherwise print an error and transition to 'IDLE'
 ```
 
 4. Add 'SEEK2CAN' state
@@ -223,10 +233,9 @@ the jaws.
 
 ```aider
 - Create the 'SEEK2CAN' state.
-- Call self.move_client.execute_move('seek2can', '') to drive the robot to the can.
-- If execute_move() returns False, transition to 'IDLE' state and return False to caller
-- If execute_move() returns True, publish the value 1400 to /servo to close the jaws,
-and transition to 'GRASPCAN'
+- Call self.move_client.execute_move('seek2can', ['']) to drive the robot to the can.
+- If execute_move() returns False, print an error, transition to 'IDLE' state and return False to caller
+- If execute_move() returns True, Close jaws, and transition to 'GRASPCAN'
 ```
 
 5. Add 'GRASPCAN' state
@@ -234,14 +243,11 @@ and transition to 'GRASPCAN'
 Make sure the can is inside the jaws and not alongside them then close jaws
 
 ```aider
-- wait 0.5 seconds for lidar data to update, then get 'bearing' and check its absolute
+- wait 0.5 seconds for lidar data to update, then get 'bearing' and check that its absolute
 value is less than 0.25. If >= 0.25 do the following:
     - print an error message
-    - open the jaws
-    - back up 0.15m
-    - Transition to the 'IDLE' state and return False to caller
-    - transition to 'IDLE' and
-- Call the '/blank_fwd_sector' service with data=True
+    - Transition to 'FAIL_RETREAT' state
+- Set blank_fwd_sector
 - Transition to 'DRIVE2GOAL' state
 ```
 
@@ -250,13 +256,28 @@ value is less than 0.25. If >= 0.25 do the following:
 ```aider
 - Drive to the goal_x, goal_y, with heading 90.0 using the nav object as shown in
 the usage example
-- If goToPose() returns false or an exception, do the following:
-    - print an error message
-    - open the jaws
-    - back up 0.15m
-    - Call the '/blank_fwd_sector' service with data=False
-    - Transition to the 'IDLE' state and return False to caller
+- If goToPose() returns false or an exception, print an error message and
+transition to 'FAIL_RETREAT' state
+- Transition to 'DROP_IN_GOAL' state
 ```
 
+7. Add 'DROP_IN_GOAL' state
+
+```aider
+- Open jaws
+- Back up 0.15m
+- Clear blank_fwd_sector
+- Rotate in place 3.14 radians
+```
+
+8. Add 'FAIL_RETREAT' state
+
+```aider
+- Open jaws
+- Back up 0.15m
+- Clear blank_fwd_sector
+- Transition to the 'IDLE' state and return False to caller
+
+```
 
 ## TO DO
