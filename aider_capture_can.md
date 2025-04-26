@@ -16,7 +16,9 @@ to release the can, and back away from it.
 - If instantiated by another module, this module will be passed a reference to the ROS
 node. If running stand-alone it must initialize ROS and create a node.
 - This node should implement a state machine which switches between states as it goes
-through the steps to capture a can
+through the steps to capture a can. The state variable should be called 'capture_sm_state'.
+Make each state call a method that performs the work and returns the next state, so
+as to aid testing.
 - add DocStrings
 - comment the code
 
@@ -76,21 +78,60 @@ def main(args=None):
 ### SingleMoveClient use example
 
 This snippet shows a class which uses the ScriptedBotClient to rotate 1.57 radians
-then drive forward 0.2 meters then backward 0.1 meters.
+then drive forward 0.2 meters then backward 0.1 meters then to seek to a can.
+
+The execute_move() method blocks until the move is complete or fails, and returns
+True for success, False otherwise.
 
 ```python
+import rclpy
+from rclpy.node import Node
+
 from scripted_bot_driver.single_move_client import SingleMoveClient
 
+'''
+This script uses the SingleMoveClient to execute a rotation move, followed
+by two straight moves then a seek2can.
+'''
 
-class ScriptedBotRoto:
-    def __init__(self, node):
-        self.node = node
-        self.move_client = SingleMoveClient(node)
+def main(argv=None):
+    rclpy.init()
+    node = Node('scripted_bot_roto')
 
-    def execute(self):
-        self.move_client.execute_move('rotate_odom', "1.57r")  # Example angle in radians
-        self.move_client.execute_move('drive_straight_odom', "0.2")  # Example distance in meters
-        self.move_client.execute_move('drive_straight_odom', "-0.1")  # Example distance in meters
+    move_client = SingleMoveClient(node)
+    move_client.execute_move('rotate_odom', ['1.57'])  # Example angle in radians
+    move_client.execute_move('drive_straight_odom', ['0.2'])  # Drive forward, example distance in meters
+    move_client.execute_move('drive_straight_odom', ['-0.1'])  # Drive backward, example distance in meters
+    move_client.execute_move('seek2can', [])  # Seek to can by tracking with lidar
+    rclpy.spin_once(node, timeout_sec=1.0)  # Allow time for the action to complete
+
+    # Clean up
+    node.destroy_node()
+    rclpy.shutdown()
+    return 0
+
+if __name__ == '__main__':
+    main()
+```
+
+### Nav2Pose use example
+
+```python
+def main():
+    rclpy.init()
+
+    nav = Nav2Pose()
+    nav.waitForNav2Active()
+
+    print(f"Navigating to: x={goal_x}, y={goal_y}, orientation={goal_orientation} degrees")
+    
+    try:
+        nav.goToPose(goal_x, goal_y, goal_orientation)
+    except Exception as e:
+        print(f"Navigation failed with error: {e}")
+
+    exit(0)
+
 ```
 
 ## Mid-level goals
@@ -110,7 +151,7 @@ and rotate to point to the nearest can using the roto action server
 2. Seek to the nearest can using the 'seek2can' action server. This should
 move the robot so that the can is in the open jaws, but the can may not end up
 in the jaws
-3. Close the jaws to grasp the can and wait 1 second for the jaws to actuate.
+3. Close the jaws to grasp the can
 4. Check that the closest can is roughly in the center of the lidar scan.
 If not, open the jaws and back away for 0.1 meters and return failure to the caller.
 5. Call the '/blank_fwd_sector' service, which removes the sector of lidar data
@@ -128,13 +169,16 @@ These tasks are ordered from start to finish
 
 ```aider
   /add 'six_can/CaptureCan.py'
+  - from .nav2pose import Nav2Pose
   - from scripted_bot_driver.single_move_client import SingleMoveClient
   - Define the class CaptureCan, whose constructor is passed a reference to the
   node. The constructor should:
     - Get the parameters goal_x and goal_y which define the position in the map frame
-    of the goal where cans should be dropped, and save them
+    of the goal where cans should be dropped, and save them. The defaults should be
+    goal_x=0.75, goal_y=0.3
     - MIRROR the provided Minimal Publisher to create a publisher which publishes
     messages of type 'example_interfaces/msg/Int32' to topic '/servo'
+    - Publish a value of 1050 to /servo. This opens the jaws.
     - MIRROR the provided Minimal Subscriber to create a subscriber which subscribes
     to topic '/closest_range_bearing' and receives messages of type geometry_msgs/msg/Point.
     The callback of this subscriber should save the x value in a class variable 'range' and
@@ -142,8 +186,9 @@ These tasks are ordered from start to finish
     - MIRROR the provided Minimal Service client code to add a service client to
     the CaptureCan class. It will use the service '/blank_fwd_sector' with
     type 'example_interfaces/srv/SetBool'.
+    - Instantiate Nav2Pose as nav
     - Create a state machine which will step through the steps described below
-    to accomplish the high-level goal. The state variable should be called 'capture_sm_state'.
+    to accomplish the high-level goal. 
     - Define a method called 'start_capture()' which will start the capture sequence and
     return True if it succeeds, False if it fails.
   - Outside the class definition add a ROS main() function which initializes
@@ -154,18 +199,64 @@ These tasks are ordered from start to finish
 
 ```aider
 - Define the 'IDLE' state, which transitions to the 'ROTATE' state when 'start_capture()' is called.
+- The state machine starts in the 'IDLE' state, and returns to it when it completes or abandons
+the goal.
 ```
 
 3. Add 'ROTATE' state
 
+Rotate to point at can, because initial position might not be pointing directly at the can.
+
 ```aider
 - Create the 'ROTATE' state.
 - Get the bearing to the closest can and call<br>
-self.move_client.execute_move('rotate_odom', "1.57r")<br>
+self.move_client.execute_move('rotate_odom', bearing)<br>
 to rotate the robot to point at the can.
 - When execute_move returns set the next state to 'IDLE' and return, passing the return
 value from execute_move() back to the caller
 ```
 
+4. Add 'SEEK2CAN' state
+
+Command execute_move to use lidar to drive directly to the can and stop when can is in
+the jaws.
+
+```aider
+- Create the 'SEEK2CAN' state.
+- Call self.move_client.execute_move('seek2can', '') to drive the robot to the can.
+- If execute_move() returns False, transition to 'IDLE' state and return False to caller
+- If execute_move() returns True, publish the value 1400 to /servo to close the jaws,
+and transition to 'GRASPCAN'
+```
+
+5. Add 'GRASPCAN' state
+
+Make sure the can is inside the jaws and not alongside them then close jaws
+
+```aider
+- wait 0.5 seconds for lidar data to update, then get 'bearing' and check its absolute
+value is less than 0.25. If >= 0.25 do the following:
+    - print an error message
+    - open the jaws
+    - back up 0.15m
+    - Transition to the 'IDLE' state and return False to caller
+    - transition to 'IDLE' and
+- Call the '/blank_fwd_sector' service with data=True
+- Transition to 'DRIVE2GOAL' state
+```
+
+6. Add 'DRIVE2GOAL' state
+
+```aider
+- Drive to the goal_x, goal_y, with heading 90.0 using the nav object as shown in
+the usage example
+- If goToPose() returns false or an exception, do the following:
+    - print an error message
+    - open the jaws
+    - back up 0.15m
+    - Call the '/blank_fwd_sector' service with data=False
+    - Transition to the 'IDLE' state and return False to caller
+```
+
+
 ## TO DO
-- Add example of calling navigator
