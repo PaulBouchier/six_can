@@ -61,7 +61,7 @@ class CaptureCan:
         self.blank_fwd_sector_client = self.node.create_client(SetBool, '/blank_fwd_sector')
 
         # Navigation and movement clients
-        self.nav = Nav2Pose(self.node) # Pass the node to Nav2Pose
+        self.nav = Nav2Pose()
         self.move_client = SingleMoveClient(self.node)
 
         # State machine variable
@@ -367,7 +367,7 @@ def main(args=None):
     node.get_logger().info("Waiting for Nav2 services to become active...")
     # Assuming Nav2Pose has waitForNav2Active as shown in example
     # Need to ensure Nav2Pose spins the node while waiting
-    if not capture_can.nav.waitForNav2Active(timeout_sec=30.0): # Generous timeout
+    if not capture_can.nav.waitForNav2Active(): # Generous timeout
          node.get_logger().error("Nav2 failed to become active. Exiting.")
          node.destroy_node()
          rclpy.shutdown()

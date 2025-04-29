@@ -18,7 +18,8 @@ node. If running stand-alone it must initialize ROS and create a node.
 - This node should implement a state machine which switches between states as it goes
 through the steps to capture a can. The state variable should be called 'capture_sm_state'.
 Make each state call a method that performs the work and returns the next state, so
-as to aid testing.
+as to aid testing. Whenever the state machine transitions to a new state print a
+diagnostic message.
 - add DocStrings
 - comment the code
 
@@ -114,10 +115,63 @@ if __name__ == '__main__':
     main()
 ```
 
-### Nav2Pose use example
+### Nav2pose use example
 
-```python
+This snippet shows how to use the Nav2pose class, which uses ROS Nav2 navigation to drive
+the robot to the requested pose. Note that Nav2pose is not a ROS Node, so do not pass
+a node to it.
+
+``` python
+    def goToPose(self, target_x, target_y, target_orientation):
+        """Navigate the robot to a target pose in the map frame.
+        
+        This method commands the robot to move to a specified position and orientation
+        in the map frame. It uses ROS 2 Navigation2 (Nav2) for path planning and execution.
+        The method blocks until the navigation is complete or fails.
+        
+        Args:
+            target_x (float): Target X coordinate in meters in the map frame
+            target_y (float): Target Y coordinate in meters in the map frame
+            target_orientation (float): Target orientation in degrees. 0 degrees points along 
+                the positive X axis, and angles increase counterclockwise.
+        
+        Returns:
+            bool: True if navigation succeeded, False if it failed or was interrupted
+        
+        Example:
+            >>> navigator = Nav2Pose()
+            >>> # Move to (1.0, 2.0) facing 90 degrees (along +Y axis)
+            >>> success = navigator.goToPose(1.0, 2.0, 90.0)
+        """
+        target_pose = PoseStamped()
+        target_pose.header.frame_id = 'map'
+        target_pose.header.stamp = self.navigator.get_clock().now().to_msg()
+        target_pose.pose.position.x = target_x
+        target_pose.pose.position.y = target_y
+        target_pose.pose.orientation.w = round(math.cos(math.radians(target_orientation) / 2), 3)
+        target_pose.pose.orientation.z = round(math.sin(math.radians(target_orientation) / 2), 3)
+        self.navigator.goToPose(target_pose)
+        rv = self.waitForComplete()
+        if not rv:
+            print('Goal failed to complete!')
+            return False
+        else:
+            print('Goal completed successfully!')
+            return True
+
 def main():
+    if len(sys.argv) != 4:
+        print("Usage: nav_to_point.py <x_coordinate> <y_coordinate> <orientation>")
+        exit(1)
+
+    try:
+        goal_x = float(sys.argv[1])
+        goal_y = float(sys.argv[2])
+        goal_orientation = float(sys.argv[3])
+    except ValueError:
+        print("Error: Coordinates must be valid floating-point numbers.")
+        exit(1)
+
     rclpy.init()
 
     nav = Nav2Pose()
@@ -131,7 +185,6 @@ def main():
         print(f"Navigation failed with error: {e}")
 
     exit(0)
-
 ```
 
 ## Mid-level goals
@@ -153,7 +206,7 @@ move the robot so that the can is in the open jaws, but the can may not end up
 in the jaws
 3. Close the jaws to grasp the can
 4. Check that the closest can is roughly in the center of the lidar scan.
-If not, open the jaws and back away for 0.1 meters and return failure to the caller.
+If not, open the jaws and back away for 0.15 meters and return failure to the caller.
 5. Call the '/blank_fwd_sector' service, which removes the sector of lidar data
 obscured by the can
 6. Command the navigator to drive to the goal pose
@@ -174,6 +227,8 @@ In these tasks:
 in the move_client example
 - "Rotate in place by x radians" means call self.move_client.execute_move('rotate_odom', [x]) where
 x must be a string containing the number of radians to rotate.
+- When the low-level tasks call for a sleep or a wait, it needs to delay while calling spin(),
+as it is a ROS2 node.
 
 1. Create CaptureCan class.
 
@@ -200,13 +255,13 @@ x must be a string containing the number of radians to rotate.
     - Instantiate Nav2Pose as nav
     - Create a state machine which will step through the steps described below
     to accomplish the high-level goal. 
-    - Define a method called 'start_capture()' which will start the capture state machine and
+    - Define a method called 'start_capture()' which will start the capture sequence and
     return True if it succeeds, False if it fails.
   - Outside the class definition add a ROS main() function which initializes
   ROS and creates the node and calls start_capture(). This is to test this part of the system.
 ```
 
-2. Add idle state
+2. Add 'IDLE' state
 
 ```aider
 - Define the 'IDLE' state, which transitions to the 'ROTATE' state when 'start_capture()' is called.
@@ -220,10 +275,11 @@ Rotate to point at can, because initial position might not be pointing directly 
 
 ```aider
 - Create the 'ROTATE' state.
-- Get the bearing to the closest can
-- Rotate in place bearing radians. This causes the robot to point at the can.
-Note that bearing must be a string containing a float that represents the number of radians to rotate
-- If execute_move returns True, transition to 'SEEK2CAN', otherwise print an error and transition to 'IDLE'
+- Get the bearing to the closest can and call<br>
+self.move_client.execute_move('rotate_odom', bearing)<br>
+to rotate the robot to point at the can.
+- When execute_move returns set the next state to 'IDLE' and return, passing the return
+value from execute_move() back to the caller
 ```
 
 4. Add 'SEEK2CAN' state
@@ -234,13 +290,14 @@ the jaws.
 ```aider
 - Create the 'SEEK2CAN' state.
 - Call self.move_client.execute_move('seek2can', ['']) to drive the robot to the can.
-- If execute_move() returns False, print an error, transition to 'IDLE' state and return False to caller
-- If execute_move() returns True, Close jaws, and transition to 'GRASPCAN'
+- If execute_move() returns False, transition to 'IDLE' state and return False to caller
+- If execute_move() returns True, publish the value 1400 to /servo to close the jaws,
+and transition to 'GRASPCAN'
 ```
 
 5. Add 'GRASPCAN' state
 
-Make sure the can is inside the jaws and not alongside them then close jaws
+Make sure the can is inside the jaws and not alongside them
 
 ```aider
 - wait 0.5 seconds for lidar data to update, then get 'bearing' and check that its absolute
@@ -250,12 +307,11 @@ value is less than 0.25. If >= 0.25 do the following:
 - Set blank_fwd_sector
 - Transition to 'DRIVE2GOAL' state
 ```
-
 6. Add 'DRIVE2GOAL' state
 
 ```aider
 - Drive to the goal_x, goal_y, with heading 90.0 using the nav object as shown in
-the usage example
+the Nav2pose use example
 - If goToPose() returns false or an exception, print an error message and
 transition to 'FAIL_RETREAT' state
 - Transition to 'DROP_IN_GOAL' state

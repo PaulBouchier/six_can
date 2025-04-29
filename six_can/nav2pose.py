@@ -32,6 +32,7 @@ class Nav2Pose:
         print("Waiting for Nav2 to be active...")
         self.navigator.waitUntilNav2Active()
         print("Nav2 is active!")
+        return True
 
     def waitForComplete(self):
         try:
