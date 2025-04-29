@@ -37,20 +37,27 @@ def main(args=None):
         msg.data = 1400
         logger.info("Commanding jaws to CLOSE (1400)")
 
-    # Allow time for publisher to connect (optional but good practice)
-    time.sleep(0.5) # Or use rate/spin_once for more robust connection check
+    # Allow time for publisher to connect and ensure discovery
+    logger.info("Waiting 2 seconds for publisher connection...")
+    start_time = time.time()
+    while time.time() - start_time < 2.0:
+        rclpy.spin_once(node, timeout_sec=0.1)
+    logger.info("Wait complete.")
 
     # Publish the message
     servo_pub.publish(msg)
     logger.info(f"Published {msg.data} to /servo")
 
-    # Give a brief moment for the message to be sent before shutting down
-    # Spin once allows callbacks to process if needed, and ensures publish occurs
-    try:
-        rclpy.spin_once(node, timeout_sec=0.5)
-    except Exception as e:
-        logger.error(f"Error during spin_once: {e}")
-
+    # Give time for the message to be sent/processed before shutting down
+    logger.info("Waiting 1 second before shutdown...")
+    start_time = time.time()
+    while time.time() - start_time < 1.0:
+        try:
+            rclpy.spin_once(node, timeout_sec=0.1)
+        except Exception as e:
+            logger.error(f"Error during spin_once: {e}")
+            break # Exit loop on error
+    logger.info("Wait complete.")
 
     # Cleanup
     node.destroy_node()
