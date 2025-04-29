@@ -44,9 +44,24 @@ def main(args=None):
         rclpy.spin_once(node, timeout_sec=0.1)
     logger.info("Wait complete.")
 
-    # Publish the message
+    # Publish the message the first time
     servo_pub.publish(msg)
-    logger.info(f"Published {msg.data} to /servo")
+    logger.info(f"Published {msg.data} to /servo (1st time)")
+
+    # Wait 1 second before publishing again
+    logger.info("Waiting 1 second before second publish...")
+    start_time = time.time()
+    while time.time() - start_time < 1.0:
+        try:
+            rclpy.spin_once(node, timeout_sec=0.1)
+        except Exception as e:
+            logger.error(f"Error during spin_once: {e}")
+            break # Exit loop on error
+    logger.info("Wait complete.")
+
+    # Publish the message the second time
+    servo_pub.publish(msg)
+    logger.info(f"Published {msg.data} to /servo (2nd time)")
 
     # Give time for the message to be sent/processed before shutting down
     logger.info("Waiting 1 second before shutdown...")
