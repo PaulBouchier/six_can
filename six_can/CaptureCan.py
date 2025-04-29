@@ -85,7 +85,7 @@ class CaptureCan:
         self._clear_blank_fwd_sector()
 
         # Instantiate Nav2Pose
-        self.nav = Nav2Pose(self.node)
+        self.nav = Nav2Pose()
         self.logger.info("Nav2Pose instantiated.")
 
         # Instantiate SingleMoveClient
@@ -103,7 +103,7 @@ class CaptureCan:
         self.range = msg.x
         self.bearing = msg.y
         self._last_bearing_update_time = self.node.get_clock().now()
-        # self.logger.info(f"Received range: {self.range}, bearing: {self.bearing}", throttle_duration_sec=1.0)
+        self.logger.info(f"Received range: {self.range}, bearing: {self.bearing}", throttle_duration_sec=0.2)
 
 
     def _open_jaws(self):
