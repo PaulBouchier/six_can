@@ -28,6 +28,7 @@ setup(
     entry_points={
         'console_scripts': [
             'odom_republisher = six_can.odom_republisher:main',
+            'jaws = six_can.jaws:main', # Add this line
         ],
     },
 )
