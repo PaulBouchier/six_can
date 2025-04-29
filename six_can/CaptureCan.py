@@ -186,7 +186,7 @@ class CaptureCan:
     def _state_seek2can(self) -> str:
         """SEEK2CAN state: Move towards the can using lidar."""
         self.logger.info("Executing seek2can move.")
-        success = self.move_client.execute_move('seek2can', ['']) # Argument needed, even if empty
+        success = self.move_client.execute_move('seek2can', [])
 
         if success:
             self.logger.info("seek2can successful. Closing jaws.")
@@ -229,14 +229,14 @@ class CaptureCan:
 
     def _state_drive2goal(self) -> str:
         """DRIVE2GOAL state: Navigate to the goal location."""
-        self.logger.info(f"Navigating to goal: x={self.goal_x}, y={self.goal_y}, orientation=90.0 deg")
+        self.logger.info(f"Navigating to goal: x={self.goal_x}, y={self.goal_y}, orientation=-90.0 deg")
         try:
             # Ensure Nav2 is ready before commanding
             # waitForNav2Active might be better placed before starting the whole sequence,
             # but double-checking here can't hurt if it's quick.
             # self.nav.waitForNav2Active(timeout_sec=5.0) # Optional check with timeout
 
-            success = self.nav.goToPose(self.goal_x, self.goal_y, 90.0)
+            success = self.nav.goToPose(self.goal_x, self.goal_y, -90.0)
             if success:
                 self.logger.info("Navigation to goal successful.")
                 return 'DROP_IN_GOAL'

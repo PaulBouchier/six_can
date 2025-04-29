@@ -238,9 +238,9 @@ as it is a ROS2 node.
   - from scripted_bot_driver.single_move_client import SingleMoveClient
   - Define the class CaptureCan, whose constructor is passed a reference to the
   node. The constructor should:
-    - Get the parameters goal_x and goal_y which define the position in the map frame
+    - Get the parameters goal_x and goal_y and goal_theta which define the pose in the map frame
     of the goal where cans should be dropped, and save them. The defaults should be
-    goal_x=0.75, goal_y=0.3
+    goal_x=0.75, goal_y=0.3, goal_theta=-90.0
     - MIRROR the provided Minimal Publisher to create a publisher which publishes
     messages of type 'example_interfaces/msg/Int32' to topic '/servo'
     - Open jaws
@@ -289,7 +289,7 @@ the jaws.
 
 ```aider
 - Create the 'SEEK2CAN' state.
-- Call self.move_client.execute_move('seek2can', ['']) to drive the robot to the can.
+- Call self.move_client.execute_move('seek2can', []) to drive the robot to the can.
 - If execute_move() returns False, transition to 'IDLE' state and return False to caller
 - If execute_move() returns True, publish the value 1400 to /servo to close the jaws,
 and transition to 'GRASPCAN'
@@ -310,7 +310,7 @@ value is less than 0.25. If >= 0.25 do the following:
 6. Add 'DRIVE2GOAL' state
 
 ```aider
-- Drive to the goal_x, goal_y, with heading 90.0 using the nav object as shown in
+- Drive to the goal_x, goal_y, goal_theta using the nav object as shown in
 the Nav2pose use example
 - If goToPose() returns false or an exception, print an error message and
 transition to 'FAIL_RETREAT' state
