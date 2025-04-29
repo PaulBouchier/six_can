@@ -40,7 +40,7 @@ def main(args=None):
     # Allow time for publisher to connect and ensure discovery
     logger.info("Waiting 2 seconds for publisher connection...")
     start_time = time.time()
-    while time.time() - start_time < 2.0:
+    while time.time() - start_time < 5.0:
         rclpy.spin_once(node, timeout_sec=0.1)
     logger.info("Wait complete.")
 
