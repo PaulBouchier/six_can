@@ -8,7 +8,6 @@ from geometry_msgs.msg import Point
 from example_interfaces.msg import Int32
 from example_interfaces.srv import SetBool
 
-import time
 import math
 
 # Import required local modules
@@ -98,6 +97,14 @@ class CaptureCan:
         self._last_bearing_update_time = self.node.get_clock().now()
 
 
+    def _spin_sleep(self, duration_sec: float):
+        """Spin the node for a specified duration, allowing callbacks."""
+        start_time = self.node.get_clock().now()
+        end_time = start_time + rclpy.duration.Duration(seconds=duration_sec)
+        while self.node.get_clock().now() < end_time:
+            rclpy.spin_once(self.node, timeout_sec=0.01) # Spin with a small timeout
+
+
     def _range_bearing_callback(self, msg: Point):
         """Callback for the /closest_range_bearing topic."""
         self.range = msg.x
@@ -112,7 +119,7 @@ class CaptureCan:
         msg.data = 1050
         self.servo_pub.publish(msg)
         self.logger.info("Commanding jaws to OPEN.")
-        time.sleep(1.0) # Allow time for servo to move
+        self._spin_sleep(1.0) # Allow time for servo to move
 
 
     def _close_jaws(self):
@@ -121,7 +128,7 @@ class CaptureCan:
         msg.data = 1400
         self.servo_pub.publish(msg)
         self.logger.info("Commanding jaws to CLOSE.")
-        time.sleep(1.0) # Allow time for servo to move
+        self._spin_sleep(1.0) # Allow time for servo to move
 
 
     def _call_blank_fwd_sector_service(self, value: bool):
@@ -219,7 +226,7 @@ class CaptureCan:
         # Wait briefly for fresh bearing data if needed
         if (self.node.get_clock().now() - self._last_bearing_update_time).nanoseconds / 1e9 > 0.5:
              self.logger.warn("Bearing data is stale, waiting briefly...")
-             time.sleep(0.5)
+             self._spin_sleep(0.5)
              # Check again
              if (self.node.get_clock().now() - self._last_bearing_update_time).nanoseconds / 1e9 > 0.5:
                  self.logger.error("Bearing data did not update. Aborting rotate.")
@@ -259,7 +266,7 @@ class CaptureCan:
     def _do_graspcan(self):
         """State: GRASPCAN. Verify capture and blank lidar sector."""
         self.logger.info("State: GRASPCAN")
-        time.sleep(0.5) # Wait for lidar/bearing update after closing jaws/moving
+        self._spin_sleep(0.5) # Wait for lidar/bearing update after closing jaws/moving
 
         # Check if bearing data is recent enough
         if (self.node.get_clock().now() - self._last_bearing_update_time).nanoseconds / 1e9 > 1.0:
@@ -341,7 +348,11 @@ def main(args=None):
     # Example: Start the capture sequence immediately for testing
     # In a real scenario, this might be triggered by another node or event.
     node.get_logger().info("Waiting 2 seconds before starting capture...")
-    time.sleep(2.0) # Give time for subscriptions etc. to establish
+    # Spin for 2 seconds to allow subscriptions etc. to establish
+    start_time = node.get_clock().now()
+    end_time = start_time + rclpy.duration.Duration(seconds=2.0)
+    while node.get_clock().now() < end_time:
+        rclpy.spin_once(node, timeout_sec=0.01)
 
     # Keep node alive while capture runs (spin_until_future_complete handles spinning)
     success = capture_can_logic.start_capture()
