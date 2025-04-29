@@ -38,7 +38,7 @@ def main(args=None):
         logger.info("Commanding jaws to CLOSE (1400)")
 
     # Allow time for publisher to connect (optional but good practice)
-    # time.sleep(0.5) # Or use rate/spin_once for more robust connection check
+    time.sleep(0.5) # Or use rate/spin_once for more robust connection check
 
     # Publish the message
     servo_pub.publish(msg)
