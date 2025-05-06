@@ -28,7 +28,7 @@ setup(
     entry_points={
         'console_scripts': [
             'odom_republisher = six_can.odom_republisher:main',
-            'CaptureCan = six_can.CaptureCan:main',
+            'capture_can = six_can.capture_can:main',
         ],
     },
 )
