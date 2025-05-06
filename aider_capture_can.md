@@ -233,7 +233,7 @@ as it is a ROS2 node.
 1. Create CaptureCan class.
 
 ```aider
-  /add 'six_can/CaptureCan.py'
+  /add 'six_can/capture_can.py'
   - from .nav2pose import Nav2Pose
   - from scripted_bot_driver.single_move_client import SingleMoveClient
   - Define the class CaptureCan, whose constructor is passed a reference to the
