@@ -17,6 +17,7 @@ setup(
         (os.path.join('share', package_name, 'maps'), glob('maps/*')),
         (os.path.join('share', package_name, 'rviz'), glob('rviz/*')),
         (os.path.join('share', package_name, 'config'), glob('config/*')),
+        ('share/' + package_name + '/resource', ['resource/search_poses.yaml']),
     ],
     install_requires=['setuptools'],
     zip_safe=True,
@@ -29,6 +30,7 @@ setup(
         'console_scripts': [
             'odom_republisher = six_can.odom_republisher:main',
             'capture_can = six_can.capture_can:main',
+            'yaml_parser_node = six_can.yaml_parser_node:main',
         ],
     },
 )

@@ -93,75 +93,11 @@ if __name__ == '__main__':
 
 ### Nav2pose use example
 
-This snippet shows how to use the Nav2pose class, which uses ROS Nav2 navigation to drive
-the robot to the requested pose. Note that Nav2pose is not a ROS Node, so do not pass
-a node to it.
+/read-only 'six_can/nav2pose.py'
 
-``` python
-    def goToPose(self, target_x, target_y, target_orientation):
-        """Navigate the robot to a target pose in the map frame.
-        
-        This method commands the robot to move to a specified position and orientation
-        in the map frame. It uses ROS 2 Navigation2 (Nav2) for path planning and execution.
-        The method blocks until the navigation is complete or fails.
-        
-        Args:
-            target_x (float): Target X coordinate in meters in the map frame
-            target_y (float): Target Y coordinate in meters in the map frame
-            target_orientation (float): Target orientation in degrees. 0 degrees points along 
-                the positive X axis, and angles increase counterclockwise.
-        
-        Returns:
-            bool: True if navigation succeeded, False if it failed or was interrupted
-        
-        Example:
-            >>> navigator = Nav2Pose()
-            >>> # Move to (1.0, 2.0) facing 90 degrees (along +Y axis)
-            >>> success = navigator.goToPose(1.0, 2.0, 90.0)
-        """
-        target_pose = PoseStamped()
-        target_pose.header.frame_id = 'map'
-        target_pose.header.stamp = self.navigator.get_clock().now().to_msg()
-        target_pose.pose.position.x = target_x
-        target_pose.pose.position.y = target_y
-        target_pose.pose.orientation.w = round(math.cos(math.radians(target_orientation) / 2), 3)
-        target_pose.pose.orientation.z = round(math.sin(math.radians(target_orientation) / 2), 3)
-        self.navigator.goToPose(target_pose)
-        rv = self.waitForComplete()
-        if not rv:
-            print('Goal failed to complete!')
-            return False
-        else:
-            print('Goal completed successfully!')
-            return True
-
-def main():
-    if len(sys.argv) != 4:
-        print("Usage: nav_to_point.py <x_coordinate> <y_coordinate> <orientation>")
-        exit(1)
-
-    try:
-        goal_x = float(sys.argv[1])
-        goal_y = float(sys.argv[2])
-        goal_orientation = float(sys.argv[3])
-    except ValueError:
-        print("Error: Coordinates must be valid floating-point numbers.")
-        exit(1)
-
-    rclpy.init()
-
-    nav = Nav2Pose()
-    nav.waitForNav2Active()
-
-    print(f"Navigating to: x={goal_x}, y={goal_y}, orientation={goal_orientation} degrees")
-    
-    try:
-        nav.goToPose(goal_x, goal_y, goal_orientation)
-    except Exception as e:
-        print(f"Navigation failed with error: {e}")
-
-    exit(0)
-```
+This file's main() shows how to use the Nav2pose class, which uses ROS
+Nav2 navigation to drive the robot to the requested pose. Note that
+Nav2pose is not a ROS Node, so do not pass a node to its constructor.
 
 ## Mid-level Objective
 
@@ -175,31 +111,38 @@ and
 
 The strategy to be used to move the cans to the goal shall be:
 
-1. Read and parse the yaml file containing the list of search coordinates
-2. Drive from the start position to the next search coordinate
-3. Find the nearest can that is inside the arena
-4. Drive to a 'can_target_pose' position that is 20 cm from the can,
-facing the can, positioned on a line from the middle of the arena to the can.
-5. Use the drive_waypoints action to drive to a waypoint that is 5cm before the can
-6. Close the gripper and call the blank_fwd_scan service passing data = true
-7. Drive to the goal end, beyond the goal line. This will carry the can beyond the goal line.
-8. Command the 'can_dropper' to release the can and back away from it
-9. Repeat from step 2 until no more cans are found  
+1. Read and parse the yaml file containing the list of search poses
+2. Drive from the start position to the next search pose
+3. Find the nearest can and check that it is inside the arena
+4. Tell the CaptureCan class to move the can to the goal area
+5. Drive back to the last search pose from step 2 and repeat steps 3 and 4
+until no more cans are found at that search pose, then drive to the next
+search pose. If there are no more poses in the list, start over from the
+beginning of the search list.
 
 ## Low-level tasks
 
 These tasks are ordered from start to finish
 
+In these tasks:
+- Drive to a place means use the Nav2Pose class as shown in the 'Nave2Pose use example'
+to move the robot from its current pose to the requested pose
+
 1. Create SixCanRunner class
+
+This class will be a ROS2 node.
 
 ```aider
 /add 'six_can/six_can_runner.py'
-/read-only 'six_can/CaptureCan.py'
+/read-only 'six_can/capture_can.py'
   - from .nav2pose import Nav2Pose
+  - from .capture_can import CaptureCan
+  - from .yaml_parser_node import YamlParserNode
   - Define the class SixCanRunner, whose constructor is passed a reference to the
   node. The constructor should:
-    - Get the parameters 'arena_max_x' and 'arena_max_y' which define the maximum extents of the arena
-    - Get the parameter 'search_coords_file' which defines the locations the robot should
+    - Get the parameters 'arena_max_x' and 'arena_max_y' which define the maximum extents of the arena.
+    The default arena_max_x should be 2.0, default arena_max_y should be 2.0
+    - Get the parameter 'search_poses_file' which defines the locations the robot should
     drive to try and find cans. The default should be 'package_share_directory/resource/search_coords.yaml'
     - Read and parse the yaml file containing the list of search poses and save them
     in a list of Pose messages called 'search_poses'. Throw an exception if this operation fails.
@@ -209,18 +152,29 @@ These tasks are ordered from start to finish
     - MIRROR the provided Minimal Subscriber code to add a subscriber to topic
     '/can_positions' with message type geometry_msgs/msg/PoseArray. The callback should
     save the first pose from the array in a 'closest_can_pose' variable
+    - Instantiate the 'CaptureCan' class as 'capture_can'
+    - Instantiate the 'Nav2Pose' class as 'nav2pose'
+    - Instantiate the 'YamlParserNode' class as 'yaml_parser_node'
 ```
 
-2. Drive to search coordinates
+2. Drive to search poses, look for cans, capture any found
+
+Within the arean means that for the current pose, x and y are > 0 and x < arena_max_x
+and y < arena_max_y
 
 ```aider
-  - Drive to each coordinate in 'search_poses' in turn and check for cans near that location.
-  When all locations in the list have been visited, start over at the beginning of the list.
-  - At each location in 'search_poses', if 'can_detected' is true and if the first element
-  in 'closest_can_pose' is within the arena, call the 'capture_can'
-  - 
+  - Run the following loop forever. When all poses in the list have been visited,
+  start over at the beginning of the list.
+    - Drive to the next pose in 'search_poses'
+    - Check for cans at that location by testing 'can_detected'.
+    - If 'can_detected' is true and if the first element
+    in 'closest_can_pose' is within the arena, call 'capture_can.start_capture()' which will
+    grab the can, deposit it in the goal, and leave the robot facing the arena in the goal area.
+    - If 'can_detected' is false, drive to the next pose in 'search_poses'
+    - If 'capture_can.start_capture()' returns false, mdrive to the next location in 'search_poses',
+    otherwise check 'can_detected' again.
 
-6. Update build files
+3. Update build files
 
 ```aider
 /add setup.py
