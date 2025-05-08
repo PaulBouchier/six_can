@@ -9,35 +9,34 @@ Create a ROS2 node which drives a robot so as to move six soda cans
 from a competition arena to beyond a goal line at the opposite end of
 the arena from where the robot started.  The arena size is 3.05 meters
 by 2.13 meters in size, with a 0.90 meter wide goal line in the middle
-of the narrow side of the arena.
+of the narrow side of the arena. For testing, allow parameters to change
+the arena size.
 
 ## Implementation Notes
-- The node is to be a ROS2 python node
+- The node is to be a ROS2 node in a python file called six_can_runner.py
 - Be sure to follow the low-level tasks in order and in detail
 - Use the current git branch
-- add DocStrings;
-- comment the code;
-- This node should implement a state machine which switches between states
-as it goes through the steps to move all six cans to the goal. The state
-variable should be called 'six_can_sm_state'. Make each state call a
-method that performs the work and returns the next state, so as to aid
-testing. Whenever the state machine transitions to a new state print a
-diagnostic message.
+- add DocStrings
+- comment the code
 
 ## Context
 
 This is the highest level module in a system that moves six soda cans to a goal area.
 It uses the following resources to accomplish the goal:
-- ROS2 navigator class to drive the robot to different poses from where
-'can_finder should be called to find if there are any detected cans that
+- 'Nav2Pose' class to drive the robot to different poses from where
+ROS messages are inspected to find if there are any close cans that
 are within the arena
-- 'can_finder' class which finds cans in a 360 degree lidar scan and
-publishes data about the positions of cans (in the map frame) in a
-geometry_msgs/msg/PoseArray message on topic '/can_positions'. The
-'can_finder' also publishes the range and bearing to the closest can in
-a geometry_msgs/msg/Point message on topic '/closest_range_bearing'.
 - 'CaptureCan' class to move to the nearest can and grasp it and carry it to the
 goal, drop it, and return success or fail status
+
+There is a 'can_finder' node in the system which finds cans in a
+360 degree lidar scan and publishes data about the positions of cans
+(in the map frame) in a geometry_msgs/msg/PoseArray message on topic
+'/can_positions'. The 'can_finder' also publishes the range and bearing
+to the closest can in a geometry_msgs/msg/Point message on topic
+'/closest_range_bearing'. It also publishes a example_msgs/msg/Bool
+message on topic '/can_detected' which indicates whether a can was
+detected at this location.
 
 ### Beginning context
 
@@ -91,25 +90,17 @@ if __name__ == '__main__':
     main()
 ```
 
-### Nav2pose use example
+### Nav2Pose use example
 
 /read-only 'six_can/nav2pose.py'
 
-This file's main() shows how to use the Nav2pose class, which uses ROS
+This file's main() shows how to use the Nav2Pose class, which uses ROS
 Nav2 navigation to drive the robot to the requested pose. Note that
 Nav2pose is not a ROS Node, so do not pass a node to its constructor.
 
 ## Mid-level Objective
 
-Create a state machine which performs the steps below using these resources:
-- The Nav2pose class is called to perform driving tasks
-- The ROS2 message '/goal_can_pos' with message type 'geometry_msgs/msg/PointStamped'
-contains the position of the nearest can. Only cans inside the arena shall be considered
-as targets.
-- Cans are inside the arena if their x and y pose locations are greater than zero
-and 
-
-The strategy to be used to move the cans to the goal shall be:
+Create a routine which moves cans to the goal using these steps:
 
 1. Read and parse the yaml file containing the list of search poses
 2. Drive from the start position to the next search pose
@@ -173,6 +164,7 @@ and y < arena_max_y
     - If 'can_detected' is false, drive to the next pose in 'search_poses'
     - If 'capture_can.start_capture()' returns false, mdrive to the next location in 'search_poses',
     otherwise check 'can_detected' again.
+```
 
 3. Update build files
 
