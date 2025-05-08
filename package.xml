@@ -7,6 +7,19 @@
   <maintainer email="paul.bouchier@gmail.com">bouchier</maintainer>
   <license>Apache-2.0</license>
 
+  <exec_depend>rclpy</exec_depend>
+  <exec_depend>geometry_msgs</exec_depend>
+  <exec_depend>example_interfaces</exec_depend>
+  <exec_depend>nav_msgs</exec_depend>
+  <exec_depend>tf2_ros</exec_depend>
+  <exec_depend>tf2_geometry_msgs</exec_depend>
+  <exec_depend>python3-yaml</exec_depend>
+  <exec_depend>ament_index_python</exec_depend>
+  <exec_depend>nav2_simple_commander</exec_depend>
+  <!-- Add scripted_bot_driver if it is a ROS 2 package. 
+       If it's a pip-installed Python library, add it to install_requires in setup.py instead. -->
+  <exec_depend>scripted_bot_driver</exec_depend>
+
   <test_depend>ament_copyright</test_depend>
   <test_depend>ament_flake8</test_depend>
   <test_depend>ament_pep257</test_depend>
