@@ -262,7 +262,7 @@ class SixCanRunner(Node):
             # Inner loop: attempt to capture cans from this current_search_pose
             while rclpy.ok():
                 rclpy.spin_once(self, timeout_sec=0.2) # Process callbacks for can_detected, closest_can_pose
-                self.get_logger().debug(f"At {pose_name} - Can detected: {self.can_detected}, "
+                self.get_logger().info(f"At {pose_name} - Can detected: {self.can_detected}, "
                                        f"Closest can pose valid: {self.closest_can_pose is not None}")
 
                 if self.can_detected and self.closest_can_pose and self.is_can_in_arena(self.closest_can_pose):
@@ -293,6 +293,10 @@ class SixCanRunner(Node):
                 else: # No can detected, or pose data missing, or can not in arena
                     self.get_logger().info(f"No suitable can detected at {pose_name} (or can outside arena). "
                                            "Moving to next search pose.")
+                    self.get_logger().info(f"can_detected: {self.can_detected}, "
+                                           f"closest_can_position x: {self.closest_can_pose.position.x}, "
+                                           f"y: {self.closest_can_pose.position.y}, "
+                                           f"in_arena: {self.is_can_in_arena(self.closest_can_pose)}")
                     break # Break inner loop, go to next search pose
             
             if not rclpy.ok(): break # Check before advancing index and sleeping

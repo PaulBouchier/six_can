@@ -170,9 +170,9 @@ class CaptureCan:
              self.logger.error("Failed to get bearing data after waiting.")
              return 'FAIL_RETREAT'
 
-        bearing_rad_str = str(self.bearing)
-        self.logger.info(f"Rotating by {bearing_rad_str} radians.")
-        success = self.move_client.execute_move('rotate_odom', [bearing_rad_str])
+        rot_rad_str = str(self.bearing)
+        self.logger.info(f"Rotating by {rot_rad_str} radians.")
+        success = self.move_client.execute_move('rotate_odom', [rot_rad_str])
 
         if success:
             self.logger.info("Rotation successful.")
@@ -298,7 +298,7 @@ class CaptureCan:
             True if the sequence completes successfully (ends via DROP_IN_GOAL),
             False otherwise (ends via FAIL_RETREAT or initial error).
         """
-        self.logger.info("CaptureCan: Starting capture sequence.")
+        self.logger.info(f"CaptureCan: Starting capture sequence for can at range {self.range:.2f}m, bearing {self.bearing:.1f} rad.")
         if self.capture_sm_state != 'IDLE':
             self.logger.warn(f"CaptureCan: Cannot start, already in state '{self.capture_sm_state}'.")
             return False
