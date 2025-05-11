@@ -108,6 +108,7 @@ class OdomRepublisher(Node):
         
         try:
             if not self.buffer.can_transform('map', msg.child_frame_id, Time()):
+                self.get_logger().warn(f"Cannot transform from {msg.child_frame_id} to map frame")
                 return
             map_pose = self.buffer.transform(self.odom_pose, 'map')
         except Exception as e:
