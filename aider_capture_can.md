@@ -31,14 +31,13 @@ of the robot to the goal, and reporting success or failure to the caller.
 
 This module is part of a system which includes a 'can_finder' which finds cans
 in a 360 degree lidar scan and publishes data about the positions
-of cans (in the map frame) in a geometry_msgs/msg/PoseArray message on topic
-'/can_positions'. The 'can_finder' also publishes the range and bearing to
-the closest can in a geometry_msgs/msg/Point message on topic '/closest_range_bearing'.
+of cans (in the odom frame) in a geometry_msgs/msg/PoseArray message on topic
+'/can_positions'.
 
 ### Beginning context
 
-This module will be called when the can it should capture is in front of the robot
-and less than 0.4 meters away.
+The start_capture(can_pose) method of this module will be called when the can it should capture
+is less than 1.0 meters away.
 
 ## Reference Code Snippets
 
@@ -104,6 +103,7 @@ def main(argv=None):
     move_client.execute_move('drive_straight_odom', ['0.2'])  # Drive forward, example distance in meters
     move_client.execute_move('drive_straight_odom', ['-0.1'])  # Drive backward, example distance in meters
     move_client.execute_move('seek2can', [])  # Seek to can by tracking with lidar
+    move_client.execute_move('drive_waypoints, [1.0, 2.0])  # drive to waypoint at x=1.0, y=2.0
     rclpy.spin_once(node, timeout_sec=1.0)  # Allow time for the action to complete
 
     # Clean up
@@ -193,15 +193,19 @@ Create a module which can be imported by another module and asked to capture a c
 it to the goal. This module should make requests to the navigator and to modules in
 'scripted_bot_driver' package as specified below to move the robot.
 
-The module will also have a 'main()' method which will activate the state machine to
+The module will also have a 'main()' method which will use the CanChooser class to choose
+a can to capture, then activate the state machine to
 perform the tasks specified, assuming the robot is close to a can.
 
 This module will have a state machine that steps through the various steps involved in
 capturing a can, and handles failures. The steps to capture a can are:
 
-1. Read the bearing to the nearest can from the /closest_range_bearing topic
-and rotate to point to the nearest can using the roto action server
-2. Seek to the nearest can using the 'seek2can' action server. This should
+1. Calculate the distance to the chosen can from the pose given in the
+start_capture(capture_can_pose) call
+2. If the distance to the can is more than 0.3 meters, drive to a point 0.3 meters from the can
+using the 'drive_waypoints' action client.
+3. Rotate to point to the can using the roto action server
+This should
 move the robot so that the can is in the open jaws, but the can may not end up
 in the jaws
 3. Close the jaws to grasp the can
