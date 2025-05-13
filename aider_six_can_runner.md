@@ -103,7 +103,7 @@ Create a routine which moves cans to the goal using these steps:
 
 1. Read and parse the yaml file containing the list of search poses
 2. Drive from the start position to the next search pose
-3. Ask the 'CanTracker' class to choose a can (if one is seen)
+3. Use the 'CanChooser' class to choose a can (if one is seen)
 4. Tell the CaptureCan class to move the can to the goal area
 5. Drive back to the last search pose from step 2 and repeat steps 3 and 4
 until no more cans are found at that search pose, then drive to the next
