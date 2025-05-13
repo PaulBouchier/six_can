@@ -2,7 +2,7 @@
 
 ## High-level objective
 
-Create a class that can be called by a higher-level module to choose one among
+Create a class that can be called by a higher-level node to choose one among
 zero or more soda cans found by a can_finder node, which publishes observed
 can positions. Inspect the array of observed soda can poses,
 track them and filter each of them with a leaky bucket filter to persist
@@ -12,7 +12,8 @@ Raise an exception if no cans are found.
 
 ## Context
 
-This node subscribes to topic '/can_positions' in which each geometry_msgs/msgs/PoseArray
+This class will be called by a higher-level node and passed the node handle at initialization.
+It subscribes to topic '/can_positions' in which each geometry_msgs/msgs/PoseArray
 message describes the poses in the odom frame of any cans found in the current lidar scan.
 
 ## Low level tasks
@@ -21,10 +22,10 @@ These tasks are ordered from start to finish
 
 1. Create CanChooser class
 
-This class will be a ROS2 node
+This class will be called by a ROS2 node
 
 ```aider
-/add 'six_can/can_chooser.py'
+Create the file 'six_can/can_chooser.py' which will contain these classes
   - Define a helper class CanTracker, which tracks the state and location of each can
   - Define the class CanChooser, whose constructor is passed a reference to the node.
   The constructor should:
@@ -61,9 +62,11 @@ Save the current pose for later use
 
 4. Create a 'main()' function
 
-Create a main that helps test the class by looping forever, printing (x,y) for all the tracked cans
-every 5 seconds, ordered by increasing x within increasing y. If there are
-no tracked cans and the class raises an exception, catch it and print "No Cans"
+Create a main that helps test the class by instantiating a node,
+instantiating this class and passing it the node reference, then looping
+forever, printing (x,y) for all the tracked cans every 5 seconds,
+ordered by increasing x within increasing y. If there are no tracked
+cans and the class raises an exception, catch it and print "No Cans"
 
 5. Update build files
 
