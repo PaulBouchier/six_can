@@ -31,6 +31,7 @@ setup(
             'odom_republisher = six_can.odom_republisher:main',
             'capture_can = six_can.capture_can:main',
             'yaml_parser_node = six_can.yaml_parser_node:main',
+            'can_chooser = six_can.can_chooser:main',
         ],
     },
 )
