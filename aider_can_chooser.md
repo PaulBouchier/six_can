@@ -8,7 +8,8 @@ can positions. Inspect the array of observed soda can poses,
 track them and filter each of them with a leaky bucket filter to persist
 them for a short while if they should drop out. Average the can positions.
 Provide a method for choosing the can that is closest and returning its pose.
-Raise an exception if no cans are found.
+Raise an exception if no cans are found. Remember the last chosen can's pose
+and allow querying its range and bearing.
 
 ## Context
 
@@ -19,6 +20,9 @@ message describes the poses in the odom frame of any cans found in the current l
 ## Low level tasks
 
 These tasks are ordered from start to finish
+
+In these steps, only the position.x, position.y value of cans matters, orientation 
+does not matter.
 
 1. Create CanChooser class
 
@@ -55,20 +59,38 @@ Save the current pose for later use
 3. Create 'choose_can' method
 
 ```aider
-  - Find the closest tracked can to the current pose saved by the odom callback
-  and return its pose to the caller
+  - Choose the closest tracked can to the current pose saved by the odom callback
+  - Print the x, y pose of the chosen can and the range and bearing to it from
+  the current pose saved by the odom callback
+  - Return the pose of the chosen can to the caller
+  - Save the pose of the chosen can for later use by clients
   - If there are no tracked cans, raise a runtime exception
 ```
 
-4. Create a 'main()' function
+4. Create 'get_choice_range_bearing' method
 
-Create a main that helps test the class by instantiating a node,
-instantiating this class and passing it the node reference, then looping
-forever, printing (x,y) for all the tracked cans every 5 seconds,
-ordered by increasing x within increasing y. If there are no tracked
-cans and the class raises an exception, catch it and print "No Cans"
+```aider
+  - Calculate the range and bearing from the current odom position to the previously-chosen
+  can and return them as a tuple 'choice_range_bearing' = (range, bearing) to the caller
+  - If the pose of the chosen can is not in the list of tracked cans (with a tolerance of
+  'can_pose_variance'), raise a Runtime exception
+```
+)
+5. Create a 'main()' function
 
-5. Update build files
+Create a main function that helps test the class
+
+```aider
+Create a main function that instantiates this class and passes it the node reference,
+then loops forever, performing the following steps every 5 seconds:
+  - print (x,y) for all the tracked cans ordered by increasing x within increasing y.
+  - If there are no tracked cans and the class raises an exception, catch it and print "No Cans exception".
+  - Call the 'choose_can' method and print the x, y pose of the chosen can.
+  - Call the 'get_choice_range_bearing' method and print the range and bearing from the current odom
+  position to the chosen can
+```
+
+6. Update build files
 
 ```aider
 /add setup.py

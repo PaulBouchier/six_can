@@ -127,7 +127,7 @@ Create 'six_can/six_can_runner.py', which is the file that will contain teh SixC
 /read-only 'six_can/capture_can.py'
   - from .nav2pose import Nav2Pose
   - from .capture_can import CaptureCan
-  - from .can_tracker import CanTracker
+  - from .can_chooser import CanChooser
   - from .yaml_parser_node import YamlParserNode
   - Define the class SixCanRunner, whose constructor is passed a reference to the
   node. The constructor should:
@@ -142,7 +142,7 @@ Create 'six_can/six_can_runner.py', which is the file that will contain teh SixC
     - Instantiate the 'CaptureCan' class as 'capture_can'
     - Instantiate the 'Nav2Pose' class as 'nav2pose'
     - Instantiate the 'YamlParserNode' class as 'yaml_parser_node'
-    - Instantiate the 'CanTracker' class as can_tracker
+    - Instantiate the 'CanChooser' class as 'can_chooser'
 ```
 
 2. Drive to search poses, look for cans, capture any found
@@ -154,8 +154,8 @@ and y < arena_max_y
   - Run the following loop forever. When all poses in the list have been visited,
   start over at the beginning of the list.
     - Drive to the next pose in 'search_poses'
-    - Check for cans at that location by calling can_tracker.choose_can(). Catch any
-    exception, which means no cans were detected. 'choose_can' returns the pose in
+    - Check for cans at that location by calling can_chooser.choose_can(). Catch any
+    exception, which means no cans were detected. 'can_chooser.choose_can()' returns the pose in
     the odom frame of a can that should be captured.
     - If no cans were detected, drive to the next pose in 'search_poses'
     - If a can was chosen, call 'capture_can.start_capture()' passing the pose in the odom frame.
