@@ -24,14 +24,13 @@ the arena size.
 This is the highest level module in a system that moves six soda cans to a goal area.
 It uses the following resources to accomplish the goal:
 - 'Nav2Pose' class to drive the robot to different poses from where
-ROS messages are inspected to find if there are any close cans that
-are within the arena
-- 'CaptureCan' class to move to the nearest can and grasp it and carry it to the
+'CanTracker.choose_can()' is called to chose a can to grab.
+- 'CaptureCan' class to move to the chosen can and grasp it and carry it to the
 goal, drop it, and return success or fail status
 
 There is a 'can_finder' node in the system which finds cans in a
 360 degree lidar scan and publishes data about the positions of cans
-(in the map frame) in a geometry_msgs/msg/PoseArray message on topic
+(in the odom frame) in a geometry_msgs/msg/PoseArray message on topic
 '/can_positions'. The 'can_finder' also publishes the range and bearing
 to the closest can in a geometry_msgs/msg/Point message on topic
 '/closest_range_bearing'. It also publishes a example_msgs/msg/Bool
@@ -104,7 +103,7 @@ Create a routine which moves cans to the goal using these steps:
 
 1. Read and parse the yaml file containing the list of search poses
 2. Drive from the start position to the next search pose
-3. Find the nearest can and check that it is inside the arena
+3. Ask the 'CanTracker' class to choose a can (if one is seen)
 4. Tell the CaptureCan class to move the can to the goal area
 5. Drive back to the last search pose from step 2 and repeat steps 3 and 4
 until no more cans are found at that search pose, then drive to the next
@@ -128,6 +127,7 @@ This class will be a ROS2 node.
 /read-only 'six_can/capture_can.py'
   - from .nav2pose import Nav2Pose
   - from .capture_can import CaptureCan
+  - from .can_tracker import CanTracker
   - from .yaml_parser_node import YamlParserNode
   - Define the class SixCanRunner, whose constructor is passed a reference to the
   node. The constructor should:
@@ -137,15 +137,12 @@ This class will be a ROS2 node.
     drive to try and find cans. The default should be 'package_share_directory/resource/search_coords.yaml'
     - Read and parse the yaml file containing the list of search poses and save them
     in a list of Pose messages called 'search_poses'. Throw an exception if this operation fails.
-    - MIRROR the reference minimal subscriber code to create a subcriber which subscribes
-    to topic '/can_detected' and receives messages of type example_interfaces/msg/Bool and
-    stores the result in 'can_detected'.
     - MIRROR the provided Minimal Subscriber code to add a subscriber to topic
-    '/can_positions' with message type geometry_msgs/msg/PoseArray. The callback should
-    save the first pose from the array in a 'closest_can_pose' variable
+    '/can_positions' with message type geometry_msgs/msg/PoseArray.
     - Instantiate the 'CaptureCan' class as 'capture_can'
     - Instantiate the 'Nav2Pose' class as 'nav2pose'
     - Instantiate the 'YamlParserNode' class as 'yaml_parser_node'
+    - Instantiate the 'CanTracker' class as can_tracker
 ```
 
 2. Drive to search poses, look for cans, capture any found
@@ -157,13 +154,14 @@ and y < arena_max_y
   - Run the following loop forever. When all poses in the list have been visited,
   start over at the beginning of the list.
     - Drive to the next pose in 'search_poses'
-    - Check for cans at that location by testing 'can_detected'.
-    - If 'can_detected' is true and if the first element
-    in 'closest_can_pose' is within the arena, call 'capture_can.start_capture()' which will
-    grab the can, deposit it in the goal, and leave the robot facing the arena in the goal area.
-    - If 'can_detected' is false, drive to the next pose in 'search_poses'
-    - If 'capture_can.start_capture()' returns false, mdrive to the next location in 'search_poses',
-    otherwise check 'can_detected' again.
+    - Check for cans at that location by calling can_tracker.choose_can(). False return
+    means no cans were detected. True return means CanTracker returned the pose in
+    the odom frame of a can that should be captured.
+    - If a can was chosen, 'capture_can.start_capture()' passing the pose in the odom frame.
+    This will grab the can, deposit it in the goal, and leave the robot facing the arena in the goal area.
+    - If no cans were detected, drive to the next pose in 'search_poses'
+    - If 'capture_can.start_capture()' returns false, drive to the next location in 'search_poses',
+    otherwise go back to the current pose and check for any more cans
 ```
 
 3. Update build files
