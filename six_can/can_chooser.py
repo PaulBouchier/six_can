@@ -202,16 +202,57 @@ class CanChooser:
         else:
             # This case should ideally not be reached if self.tracked_cans is not empty
             # and trackers always return a valid averaged pose.
-            self.logger.error("Could not determine closest can, though cans are tracked. This indicates an issue.")
+            self.logger.error("Could not determine closest can, though cans are tracked. This indicates an internal issue.")
             raise RuntimeError("Failed to choose a can despite tracked cans existing.")
+
+    def get_choice_range_bearing(self) -> tuple[float, float]:
+        """
+        Calculates range and bearing from current robot pose to the last chosen can.
+        Raises RuntimeError if no can was chosen, odom is missing, or chosen can is no longer tracked.
+        """
+        if self.last_chosen_can_pose is None:
+            self.logger.warn("get_choice_range_bearing: No can has been chosen yet.")
+            raise RuntimeError("No can has been chosen yet.")
+
+        if self.current_robot_pose is None:
+            self.logger.warn("get_choice_range_bearing: Robot pose not yet available from odometry.")
+            raise RuntimeError("Robot pose not yet available to calculate range/bearing.")
+
+        # Check if the last chosen can is still effectively in the list of tracked cans
+        is_still_tracked = False
+        for tracker in self.tracked_cans:
+            tracked_avg_pose = tracker.get_averaged_pose()
+            # Compare positions only
+            dist_sq = (self.last_chosen_can_pose.position.x - tracked_avg_pose.position.x)**2 + \
+                      (self.last_chosen_can_pose.position.y - tracked_avg_pose.position.y)**2
+            if dist_sq < self.can_pose_variance_sq:
+                is_still_tracked = True
+                break
+        
+        if not is_still_tracked:
+            self.logger.warn(
+                f"get_choice_range_bearing: The previously chosen can (at "
+                f"x={self.last_chosen_can_pose.position.x:.2f}, y={self.last_chosen_can_pose.position.y:.2f}) "
+                f"is no longer actively tracked with current variance settings."
+            )
+            raise RuntimeError("Previously chosen can is no longer tracked.")
+
+        # Calculate range and bearing from current_robot_pose to last_chosen_can_pose
+        delta_x = self.last_chosen_can_pose.position.x - self.current_robot_pose.position.x
+        delta_y = self.last_chosen_can_pose.position.y - self.current_robot_pose.position.y
+        
+        range_val = math.sqrt(delta_x**2 + delta_y**2)
+        bearing_val = math.atan2(delta_y, delta_x) # Radians
+        
+        return range_val, bearing_val
 
     def get_all_tracked_cans_poses(self) -> list[Pose]:
         """Helper method to get all current (averaged) can poses for testing/logging."""
         poses = []
         for tracker in self.tracked_cans:
             pose = tracker.get_averaged_pose()
-            if pose:
-                poses.append(pose)
+            # Assuming get_averaged_pose always returns a valid Pose for an active tracker
+            poses.append(pose)
         return poses
 
 def main(args=None):
