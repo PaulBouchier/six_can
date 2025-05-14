@@ -169,16 +169,16 @@ class CanChooser:
 
     def choose_can(self) -> Pose:
         """
-        Find the closest tracked can to the current pose saved by the odom callback
-        and return its pose to the caller.
-        If there are no tracked cans, raise a runtime exception.
+        Find the closest tracked can to the current pose saved by the odom callback,
+        logs its details, saves its pose, and returns it.
+        If there are no tracked cans or odom is unavailable, raises a RuntimeError.
         """
         if self.current_robot_pose is None:
-            self.logger.warn("Robot pose not yet available from odometry.")
+            self.logger.warn("choose_can: Robot pose not yet available from odometry.")
             raise RuntimeError("Robot pose not yet available to choose a can.")
 
         if not self.tracked_cans:
-            # self.logger.info("No cans currently tracked to choose from.")
+            # self.logger.info("choose_can: No cans currently tracked to choose from.") # More specific log
             raise RuntimeError("No cans available to choose from.")
 
         closest_can_pose = None
@@ -189,15 +189,25 @@ class CanChooser:
 
         for tracker in self.tracked_cans:
             can_avg_pose = tracker.get_averaged_pose()
-            if can_avg_pose: # Should always be true for an active tracker
-                dist_sq = (can_avg_pose.position.x - robot_x)**2 + \
-                          (can_avg_pose.position.y - robot_y)**2
-                if dist_sq < min_dist_sq_to_robot:
-                    min_dist_sq_to_robot = dist_sq
-                    closest_can_pose = can_avg_pose
+            # can_avg_pose should not be None
+            dist_sq = (can_avg_pose.position.x - robot_x)**2 + \
+                        (can_avg_pose.position.y - robot_y)**2
+            if dist_sq < min_dist_sq_to_robot:
+                min_dist_sq_to_robot = dist_sq
+                closest_can_pose = can_avg_pose
         
         if closest_can_pose:
-            # self.logger.info(f"Chose can at x={closest_can_pose.position.x:.2f}, y={closest_can_pose.position.y:.2f}")
+            self.last_chosen_can_pose = closest_can_pose # Save for get_choice_range_bearing
+
+            delta_x = closest_can_pose.position.x - self.current_robot_pose.position.x
+            delta_y = closest_can_pose.position.y - self.current_robot_pose.position.y
+            range_to_can = math.sqrt(delta_x**2 + delta_y**2)
+            bearing_to_can = math.atan2(delta_y, delta_x) # Radians
+
+            self.logger.info(
+                f"Chosen can at x={closest_can_pose.position.x:.2f}, y={closest_can_pose.position.y:.2f}. "
+                f"Range: {range_to_can:.2f}m, Bearing: {math.degrees(bearing_to_can):.1f} deg."
+            )
             return closest_can_pose
         else:
             # This case should ideally not be reached if self.tracked_cans is not empty
