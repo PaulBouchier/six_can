@@ -5,7 +5,9 @@ from rclpy.executors import SingleThreadedExecutor
 
 from example_interfaces.msg import Int32
 from example_interfaces.srv import SetBool
-from geometry_msgs.msg import Point
+from geometry_msgs.msg import Point, Pose # Ensure Pose is explicitly imported
+from nav_msgs.msg import Odometry
+from tf_transformations import euler_from_quaternion
 
 import time
 import math
@@ -67,6 +69,18 @@ class CaptureCan:
         # State machine variable
         self.capture_sm_state = 'IDLE'
 
+        # Add these new initializations:
+        self.target_can_pose = None  # Will store the pose of the can to capture
+        self.current_robot_pose = None # Will store the robot's current pose from /odom
+
+        # Add odom subscriber
+        self.odom_sub = self.node.create_subscription(
+            Odometry,
+            '/odom',
+            self._odom_callback,
+            10
+        )
+
         # Initial setup
         self._open_jaws() # Start with jaws open
         if not self._call_blank_fwd_sector(False): # Clear blanking initially
@@ -80,6 +94,11 @@ class CaptureCan:
         self.range = msg.x
         self.bearing = msg.y
         # self.logger.debug(f"Received closest can data: range={self.range}, bearing={self.bearing}")
+
+    def _odom_callback(self, msg: Odometry):
+        """Callback for the /odom topic to store the robot's current pose."""
+        self.current_robot_pose = msg.pose.pose
+        # self.logger.debug(f"CaptureCan Odom updated: x={self.current_robot_pose.position.x:.2f}")
 
     def _open_jaws(self):
         """Publish command to open jaws."""
@@ -158,29 +177,63 @@ class CaptureCan:
         return 'IDLE' # Should not be called directly in the loop normally
 
     def _state_rotate(self) -> str:
-        """ROTATE state: Rotate towards the closest can."""
-        # Wait briefly for bearing data if not available
+        """ROTATE state: Rotate towards the target can."""
+        if self.target_can_pose is None:
+            self.logger.error("Target can pose not set. Cannot rotate.")
+            return 'FAIL_RETREAT'
+
+        # Wait for current robot pose if not available
         wait_count = 0
-        while self.bearing is None and wait_count < 10 and rclpy.ok():
-             self.logger.info("Waiting for bearing data...")
-             self._ros_sleep(0.2)
+        while self.current_robot_pose is None and wait_count < 20 and rclpy.ok(): # Increased wait time
+             self.logger.info("Waiting for current robot pose from /odom...")
+             self._ros_sleep(0.1) # Spin and sleep
              wait_count += 1
 
-        if self.bearing is None:
-             self.logger.error("Failed to get bearing data after waiting.")
+        if self.current_robot_pose is None:
+             self.logger.error("Failed to get current robot pose after waiting.")
              return 'FAIL_RETREAT'
 
-        bearing_rad_str = str(self.bearing)
-        self.logger.info(f"Rotating by {bearing_rad_str} radians.")
-        success = self.move_client.execute_move('rotate_odom', [bearing_rad_str])
+        # Calculate bearing to the target can
+        robot_x = self.current_robot_pose.position.x
+        robot_y = self.current_robot_pose.position.y
+        can_x = self.target_can_pose.position.x
+        can_y = self.target_can_pose.position.y
+
+        # Get current robot orientation (yaw)
+        _, _, current_robot_yaw = euler_from_quaternion([
+            self.current_robot_pose.orientation.x,
+            self.current_robot_pose.orientation.y,
+            self.current_robot_pose.orientation.z,
+            self.current_robot_pose.orientation.w
+        ])
+
+        # Calculate desired yaw to face the can
+        angle_to_can = math.atan2(can_y - robot_y, can_x - robot_x)
+
+        # Calculate rotation needed (difference between desired yaw and current yaw)
+        # Normalize angles to be within -pi to pi if necessary, though SingleMoveClient might handle large angles.
+        # The rotation amount is angle_to_can - current_robot_yaw.
+        # Positive is counter-clockwise.
+        rotation_amount_rad = angle_to_can - current_robot_yaw
+        
+        # Normalize rotation_amount_rad to the range [-pi, pi]
+        while rotation_amount_rad > math.pi:
+            rotation_amount_rad -= 2 * math.pi
+        while rotation_amount_rad < -math.pi:
+            rotation_amount_rad += 2 * math.pi
+
+        self.logger.info(f"Current robot pose: x={robot_x:.2f}, y={robot_y:.2f}, yaw={math.degrees(current_robot_yaw):.1f} deg")
+        self.logger.info(f"Target can pose: x={can_x:.2f}, y={can_y:.2f}")
+        self.logger.info(f"Angle to can: {math.degrees(angle_to_can):.1f} deg. Rotation needed: {math.degrees(rotation_amount_rad):.1f} deg.")
+
+        # The 'rotate_odom' command likely expects radians
+        success = self.move_client.execute_move('rotate_odom', [str(rotation_amount_rad)])
 
         if success:
-            self.logger.info("Rotation successful.")
-            # Reset bearing after use? Maybe not necessary if sub keeps updating.
-            # self.bearing = None
+            self.logger.info("Rotation towards target can successful.")
             return 'SEEK2CAN'
         else:
-            self.logger.error("Rotation failed.")
+            self.logger.error("Rotation towards target can failed.")
             return 'FAIL_RETREAT'
 
     def _state_seek2can(self) -> str:
@@ -290,18 +343,24 @@ class CaptureCan:
 
     # --- Public Methods ---
 
-    def start_capture(self) -> bool:
+    def start_capture(self, target_can_pose: Pose) -> bool: # Modified signature
         """
-        Starts the capture sequence state machine.
+        Starts the capture sequence state machine for a specific target can.
+
+        Args:
+            target_can_pose (Pose): The pose of the can to capture in the odom frame.
 
         Returns:
             True if the sequence completes successfully (ends via DROP_IN_GOAL),
             False otherwise (ends via FAIL_RETREAT or initial error).
         """
-        self.logger.info("CaptureCan: Starting capture sequence.")
+        self.logger.info(f"CaptureCan: Starting capture sequence for can at "
+                         f"x={target_can_pose.position.x:.2f}, y={target_can_pose.position.y:.2f}.")
         if self.capture_sm_state != 'IDLE':
             self.logger.warn(f"CaptureCan: Cannot start, already in state '{self.capture_sm_state}'.")
             return False
+
+        self.target_can_pose = target_can_pose # Store the target can pose
 
         # Initial state transition
         next_state = 'ROTATE'
