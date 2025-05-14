@@ -29,7 +29,17 @@ class CanTracker:
     def get_averaged_pose(self) -> Pose:
         """Calculates the averaged pose from the buffer."""
         if not self.poses_buffer:
-            return None # Should not happen if tracker is active
+            # This case should ideally not be reached if the tracker is active
+            # and part of self.tracked_cans, as it's initialized with a pose.
+            # However, to be safe, return a default or log an error.
+            # For now, let's assume it always has poses if active.
+            # If it could be empty, a more robust handling (e.g. returning None)
+            # and checking in the caller would be needed.
+            # Given current logic, it should always have at least one pose.
+            self.logger.error("get_averaged_pose called on an empty poses_buffer. This should not happen.")
+            # Fallback to a zero pose to prevent crashes, though this indicates a logic flaw.
+            return Pose()
+
 
         avg_x = sum(p.position.x for p in self.poses_buffer) / len(self.poses_buffer)
         avg_y = sum(p.position.y for p in self.poses_buffer) / len(self.poses_buffer)
@@ -70,6 +80,7 @@ class CanChooser:
 
         self.tracked_cans = []  # List of CanTracker objects
         self.current_robot_pose = None  # Stores nav_msgs.msg.Odometry.pose.pose (which is a Pose)
+        self.last_chosen_can_pose = None # Stores the pose of the last can chosen by choose_can()
 
         # Subscribe to /can_positions
         self.can_positions_sub = self.node.create_subscription(
@@ -119,11 +130,11 @@ class CanChooser:
             # Try to match obs_pose with an existing tracker
             for tracker in self.tracked_cans:
                 tracker_avg_pose = tracker.get_averaged_pose()
-                if tracker_avg_pose: # Should always be true for an active tracker
-                    dist_sq = (obs_pose.position.x - tracker_avg_pose.position.x)**2 + \
-                              (obs_pose.position.y - tracker_avg_pose.position.y)**2
-                    
-                    if dist_sq < min_dist_sq:
+                # tracker_avg_pose should not be None if tracker is valid
+                dist_sq = (obs_pose.position.x - tracker_avg_pose.position.x)**2 + \
+                            (obs_pose.position.y - tracker_avg_pose.position.y)**2
+                
+                if dist_sq < min_dist_sq:
                         # This observed pose is close enough to this tracker
                         # and it's the closest one found so far for this obs_pose
                         min_dist_sq = dist_sq
@@ -217,28 +228,48 @@ def main(args=None):
     timer_period = 5.0  # seconds
     
     def timer_callback():
-        node.get_logger().info("--- Checking for cans (main loop) ---")
+        node.get_logger().info("--- Timer Tick ---")
+        
+        # 1. Print all tracked cans
+        all_cans_poses = can_chooser.get_all_tracked_cans_poses() 
+        if all_cans_poses:
+            sorted_cans = sorted(all_cans_poses, key=lambda p: (p.position.y, p.position.x))
+            node.get_logger().info(f"Currently tracked cans ({len(sorted_cans)}):")
+            for i, pose in enumerate(sorted_cans):
+                node.get_logger().info(
+                    f"  Can {i+1}: (x={pose.position.x:.2f}, y={pose.position.y:.2f})"
+                )
+        else:
+            node.get_logger().info("No cans currently tracked.")
+
+        # 2. Call choose_can()
+        chosen_can_pose_from_call = None
         try:
-            # Using a helper to get all poses for logging, choose_can() is for selection
-            all_cans_poses = can_chooser.get_all_tracked_cans_poses() 
-            
-            if all_cans_poses:
-                # Sort cans: primarily by y (increasing), secondarily by x (increasing)
-                sorted_cans = sorted(all_cans_poses, key=lambda p: (p.position.y, p.position.x))
-                node.get_logger().info(f"Tracked cans ({len(sorted_cans)}):")
-                for i, pose in enumerate(sorted_cans):
-                    node.get_logger().info(
-                        f"  Can {i+1}: (x={pose.position.x:.2f}, y={pose.position.y:.2f})"
-                    )
-            else:
-                node.get_logger().info("No Cans") # This means get_all_tracked_cans_poses returned empty
+            node.get_logger().info("Calling choose_can()...")
+            chosen_can_pose_from_call = can_chooser.choose_can() 
+            # choose_can() logs its own details. Main logs the returned pose as per spec.
+            if chosen_can_pose_from_call:
+                 node.get_logger().info(
+                     f"Main: choose_can() returned pose: x={chosen_can_pose_from_call.position.x:.2f}, "
+                     f"y={chosen_can_pose_from_call.position.y:.2f}"
+                 )
         except RuntimeError as e:
-            # This specific exception handling is for choose_can(), 
-            # but the main loop here uses get_all_tracked_cans_poses().
-            # If choose_can() were called directly and raised an error (e.g. no odom), it would be caught here.
-            # For the current main loop, "No Cans" is handled by the empty list from get_all_tracked_cans_poses.
-            node.get_logger().info(f"No Cans (RuntimeError: {e})") 
-        # node.get_logger().info("--- End check ---")
+            if "No cans available" in str(e):
+                node.get_logger().info(f"Main: No Cans exception from choose_can(): {e}")
+            else:
+                node.get_logger().warn(f"Main: RuntimeError from choose_can(): {e}")
+        
+        # 3. Call get_choice_range_bearing() and print its result
+        try:
+            node.get_logger().info("Calling get_choice_range_bearing()...")
+            r, b = can_chooser.get_choice_range_bearing()
+            node.get_logger().info(
+                f"Main: get_choice_range_bearing() returned: Range={r:.2f}m, Bearing={math.degrees(b):.1f} deg."
+            )
+        except RuntimeError as e:
+            node.get_logger().warn(f"Main: RuntimeError from get_choice_range_bearing(): {e}")
+        
+        node.get_logger().info("--- End Timer Tick ---")
 
     node.create_timer(timer_period, timer_callback)
     
