@@ -136,8 +136,6 @@ Create 'six_can/six_can_runner.py', which is the file that will contain teh SixC
     drive to try and find cans. The default should be 'package_share_directory/resource/search_coords.yaml'
     - Read and parse the yaml file containing the list of search poses and save them
     in a list of Pose messages called 'search_poses'. Throw an exception if this operation fails.
-    - MIRROR the provided Minimal Subscriber code to add a subscriber to topic
-    '/can_positions' with message type geometry_msgs/msg/PoseArray.
     - Instantiate the 'CaptureCan' class as 'capture_can'
     - Instantiate the 'Nav2Pose' class as 'nav2pose'
     - Instantiate the 'CanChooser' class as 'can_chooser'

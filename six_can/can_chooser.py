@@ -5,6 +5,7 @@ from geometry_msgs.msg import PoseArray, Pose
 from nav_msgs.msg import Odometry
 import math
 import collections
+import time
 
 class CanTracker:
     """
@@ -70,12 +71,8 @@ class CanChooser:
         self.logger = self.node.get_logger()
 
         # Get parameters
-        self.can_persistence = self.node.declare_parameter(
-            'can_persistence', 3
-        ).get_parameter_value().integer_value
-        self.can_pose_variance = self.node.declare_parameter(
-            'can_pose_variance', 0.1  # meters
-        ).get_parameter_value().double_value
+        self.can_persistence = self.node.get_parameter('can_persistence').get_parameter_value().integer_value
+        self.can_pose_variance = self.node.get_parameter('can_pose_variance').get_parameter_value().double_value
         self.can_pose_variance_sq = self.can_pose_variance ** 2 # For squared distance comparison
 
         self.tracked_cans = []  # List of CanTracker objects
@@ -101,10 +98,35 @@ class CanChooser:
             f"Pose variance for matching: {self.can_pose_variance}m"
         )
 
+    def __del__(self):
+        """Destructor to clean up subscriptions."""
+        if self.can_positions_sub:
+            self.node.destroy_subscription(self.can_positions_sub)
+            self.can_positions_sub = None
+        if self.odom_sub:
+            self.node.destroy_subscription(self.odom_sub)
+            self.odom_sub = None
+        self.logger.info("CanChooser destroyed.")
+        # Note: Destructor will also clean up subscriptions, but this method allows
+        # for manual cleanup if needed before the object is deleted.
+
+    def unsubscribe(self):
+        """Unsubscribes from the can positions topic."""
+        self.node.destroy_subscription(self.can_positions_sub)
+        self.node.destroy_subscription(self.odom_sub)
+        self.can_positions_sub = None
+        self.odom_sub = None
+        self.tracked_cans = []  # Clear tracked cans
+        self.current_robot_pose = None
+        self.last_chosen_can_pose = None
+        self.logger.info("CanChooser unsubscribed and cleaned up.")
+        # Note: Destructor will also clean up subscriptions, but this method allows
+        # for manual cleanup if needed before the object is deleted.
+
     def _odom_callback(self, msg: Odometry):
         """Stores the current robot pose from odometry."""
         self.current_robot_pose = msg.pose.pose
-        # self.logger.debug(f"Odom updated: x={self.current_robot_pose.position.x:.2f}, y={self.current_robot_pose.position.y:.2f}")
+        # self.logger.info(f"CanChooser odom updated: x={self.current_robot_pose.position.x:.2f}, y={self.current_robot_pose.position.y:.2f}", throttle_duration_sec=1.0)
 
     def _can_positions_callback(self, msg: PoseArray):
         """
@@ -265,67 +287,84 @@ class CanChooser:
             poses.append(pose)
         return poses
 
-def main(args=None):
-    rclpy.init(args=args)
-    node = rclpy.create_node('can_chooser_tester_node') # Node for testing CanChooser
+def spin_and_sleep(node, duration_sec: float):
+    """Helper to spin for callbacks and sleep."""
+    start_time = node.get_clock().now()
+    end_time = start_time + rclpy.duration.Duration(seconds=duration_sec)
+    while rclpy.ok() and node.get_clock().now() < end_time:
+        rclpy.spin_once(node, timeout_sec=0.05) # Process callbacks
+        time.sleep(0.01) # Python sleep to yield CPU
+
+def run_can_chooser(node):
+    node.get_logger().info("--- Timer Tick ---")
     
     # Instantiate CanChooser, passing it the node reference
     can_chooser = CanChooser(node)
+    spin_and_sleep(node, 5.0)  # Allow time for the subscription to proces
+
+    # 1. Print all tracked cans
+    all_cans_poses = can_chooser.get_all_tracked_cans_poses() 
+    if all_cans_poses:
+        sorted_cans = sorted(all_cans_poses, key=lambda p: (p.position.y, p.position.x))
+        node.get_logger().info(f"Currently tracked cans ({len(sorted_cans)}):")
+        for i, pose in enumerate(sorted_cans):
+            node.get_logger().info(
+                f"  Can {i+1}: (x={pose.position.x:.2f}, y={pose.position.y:.2f})"
+            )
+    else:
+        node.get_logger().info("No cans currently tracked.")
+
+    # 2. Call choose_can()
+    chosen_can_pose_from_call = None
+    try:
+        # node.get_logger().info("Calling choose_can()...")
+        chosen_can_pose_from_call = can_chooser.choose_can() 
+        # choose_can() logs its own details. Main logs the returned pose as per spec.
+        if chosen_can_pose_from_call:
+                node.get_logger().info(
+                    f"Main: choose_can() returned pose: x={chosen_can_pose_from_call.position.x:.2f}, "
+                    f"y={chosen_can_pose_from_call.position.y:.2f}"
+                )
+    except RuntimeError as e:
+        if "No cans available" in str(e):
+            node.get_logger().info(f"Main: No Cans exception from choose_can(): {e}")
+        else:
+            node.get_logger().warn(f"Main: RuntimeError from choose_can(): {e}")
     
+    # 3. Call get_choice_range_bearing() and print its result
+    try:
+        # node.get_logger().info("Calling get_choice_range_bearing()...")
+        r, b = can_chooser.get_choice_range_bearing()
+        node.get_logger().info(
+            f"Main: get_choice_range_bearing() returned: Range={r:.2f}m, Bearing={math.degrees(b):.1f} deg."
+        )
+    except RuntimeError as e:
+        node.get_logger().warn(f"Main: RuntimeError from get_choice_range_bearing(): {e}")
+    
+    can_chooser.unsubscribe()  # Unsubscribe to test cleanup
+    # Spin to process callbacks
+    spin_and_sleep(node, 0.1)
+    # Log end of timer tick
+    node.get_logger().info("--- End Timer Tick ---")
+
+def main(args=None):
+    rclpy.init(args=args)
+    global node
+    node = rclpy.create_node('can_chooser_tester_node') # Node for testing CanChooser
+    
+    # Declare parameters for can detection and capture
+    node.declare_parameter('can_persistence', 3)
+    node.declare_parameter('can_pose_variance', 0.1)
+
     # Loop forever, printing (x,y) for all the tracked cans every 5 seconds,
     # ordered by increasing x within increasing y.
     # If there are no tracked cans and the class raises an exception, catch it and print "No Cans"
     
-    timer_period = 5.0  # seconds
-    
-    def timer_callback():
-        node.get_logger().info("--- Timer Tick ---")
-        
-        # 1. Print all tracked cans
-        all_cans_poses = can_chooser.get_all_tracked_cans_poses() 
-        if all_cans_poses:
-            sorted_cans = sorted(all_cans_poses, key=lambda p: (p.position.y, p.position.x))
-            node.get_logger().info(f"Currently tracked cans ({len(sorted_cans)}):")
-            for i, pose in enumerate(sorted_cans):
-                node.get_logger().info(
-                    f"  Can {i+1}: (x={pose.position.x:.2f}, y={pose.position.y:.2f})"
-                )
-        else:
-            node.get_logger().info("No cans currently tracked.")
-
-        # 2. Call choose_can()
-        chosen_can_pose_from_call = None
-        try:
-            # node.get_logger().info("Calling choose_can()...")
-            chosen_can_pose_from_call = can_chooser.choose_can() 
-            # choose_can() logs its own details. Main logs the returned pose as per spec.
-            if chosen_can_pose_from_call:
-                 node.get_logger().info(
-                     f"Main: choose_can() returned pose: x={chosen_can_pose_from_call.position.x:.2f}, "
-                     f"y={chosen_can_pose_from_call.position.y:.2f}"
-                 )
-        except RuntimeError as e:
-            if "No cans available" in str(e):
-                node.get_logger().info(f"Main: No Cans exception from choose_can(): {e}")
-            else:
-                node.get_logger().warn(f"Main: RuntimeError from choose_can(): {e}")
-        
-        # 3. Call get_choice_range_bearing() and print its result
-        try:
-            # node.get_logger().info("Calling get_choice_range_bearing()...")
-            r, b = can_chooser.get_choice_range_bearing()
-            node.get_logger().info(
-                f"Main: get_choice_range_bearing() returned: Range={r:.2f}m, Bearing={math.degrees(b):.1f} deg."
-            )
-        except RuntimeError as e:
-            node.get_logger().warn(f"Main: RuntimeError from get_choice_range_bearing(): {e}")
-        
-        node.get_logger().info("--- End Timer Tick ---")
-
-    node.create_timer(timer_period, timer_callback)
-    
     try:
-        rclpy.spin(node)
+        while rclpy.ok():
+            run_can_chooser(node)
+            # Sleep for 5 seconds
+            spin_and_sleep(node, 5.0) 
     except KeyboardInterrupt:
         node.get_logger().info("Keyboard interrupt, shutting down.")
     finally:

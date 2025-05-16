@@ -56,15 +56,9 @@ class SixCanRunner(Node):
             self.get_logger().error(f"Failed to initialize SixCanRunner due to YAML parsing error: {e}")
             raise # Re-raise to be caught by main() for shutdown
 
-        # Subscriber to /can_positions (mirroring minimal subscriber example)
-        # CanChooser also subscribes to this, this one is mostly for fulfilling the requirement
-        # or for potential direct use/logging by SixCanRunner if needed in future.
-        self.can_positions_subscription = self.create_subscription(
-            PoseArray,
-            '/can_positions',
-            self._can_positions_callback,
-            10)
-        # self.can_positions_subscription  # prevent unused variable warning if not used elsewhere
+        # Declare parameters for can detection and capture
+        self.declare_parameter('can_persistence', 3)
+        self.declare_parameter('can_pose_variance', 0.1)
 
         # Instantiate helper classes
         self.nav2pose = Nav2Pose() # Not a ROS Node, constructor takes no args
@@ -125,16 +119,6 @@ class SixCanRunner(Node):
             self.get_logger().warn(f"No valid poses were loaded from {yaml_file_path}.")
         return poses
 
-    def _can_positions_callback(self, msg: PoseArray):
-        """
-        Callback for the /can_positions subscriber.
-        Currently logs the number of received can positions. CanChooser handles detailed processing.
-        """
-        # self.get_logger().info(f'SixCanRunner received {len(msg.poses)} can positions on /can_positions.')
-        # This subscription is primarily to fulfill the "MIRROR" instruction from aider_six_can_runner.md.
-        # CanChooser has its own subscription and handles the logic.
-        pass
-
     def _navigate_to_pose(self, target_pose: Pose) -> bool:
         """
         Navigates the robot to the given target_pose using Nav2Pose.
@@ -161,6 +145,21 @@ class SixCanRunner(Node):
         else:
             self.get_logger().warn("Navigation to pose reported failure or was cancelled.")
         return success
+
+    def choose_can(self) -> Pose:
+        """
+        Uses CanChooser to select a can from the detected cans.
+        Returns the chosen can's pose.
+        """
+        can_chooser = CanChooser(self)
+        self._spin_and_sleep(5.0) # Allow time for can chooser to process and choose a can
+
+        chosen_can_pose_odom = can_chooser.choose_can() # Raises RuntimeError if no can
+        self.get_logger().info(f"Can chosen at odom coordinates: "
+                                f"x={chosen_can_pose_odom.position.x:.2f}, "
+                                f"y={chosen_can_pose_odom.position.y:.2f}")
+        can_chooser.unsubscribe() # Clean up CanChooser instance
+        return chosen_can_pose_odom
 
     def run_mission(self):
         """
@@ -195,18 +194,10 @@ class SixCanRunner(Node):
 
             # Inner loop: attempt to find and capture cans at the current_target_search_pose
             while rclpy.ok():
-                self.can_chooser = CanChooser(self) # Pass self (the SixCanRunner node)
-                # Spin a few times to allow CanChooser to process fresh sensor data
-                # (e.g., /can_positions and /odom callbacks)
-                self._spin_and_sleep(5.0) # Allow time for can chooser to process and choose a can
-                if not rclpy.ok(): break
 
                 try:
                     self.get_logger().info("Attempting to choose a can...")
-                    chosen_can_pose_odom = self.can_chooser.choose_can() # Raises RuntimeError if no can
-                    self.get_logger().info(f"Can chosen at odom coordinates: "
-                                           f"x={chosen_can_pose_odom.position.x:.2f}, "
-                                           f"y={chosen_can_pose_odom.position.y:.2f}")
+                    chosen_can_pose_odom = self.choose_can() # Raises RuntimeError if no can
 
                     # A can was chosen, now try to capture it
                     self.get_logger().info("Attempting to capture the chosen can...")
