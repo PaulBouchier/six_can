@@ -163,9 +163,9 @@ class CanChooser:
                     # self.logger.debug(f"Can tracker (last at x={avg_p.position.x:.2f}, y={avg_p.position.y:.2f}) not seen, persistence now {tracker.current_persistence}")
                 else:
                     avg_p = tracker.get_averaged_pose()
-                    self.logger.info(f"Removed can tracker (last at x={avg_p.position.x:.2f}, y={avg_p.position.y:.2f}) due to persistence timeout.")
+                    # self.logger.info(f"Removed can tracker (last at x={avg_p.position.x:.2f}, y={avg_p.position.y:.2f}) due to persistence timeout.")
         self.tracked_cans = surviving_cans
-        # self.logger.debug(f"Total tracked cans after persistence update: {len(self.tracked_cans)}")
+        # self.logger.info(f"Total tracked cans after persistence update: {len(self.tracked_cans)}")
 
     def choose_can(self) -> Pose:
         """
@@ -296,7 +296,7 @@ def main(args=None):
         # 2. Call choose_can()
         chosen_can_pose_from_call = None
         try:
-            node.get_logger().info("Calling choose_can()...")
+            # node.get_logger().info("Calling choose_can()...")
             chosen_can_pose_from_call = can_chooser.choose_can() 
             # choose_can() logs its own details. Main logs the returned pose as per spec.
             if chosen_can_pose_from_call:
@@ -312,7 +312,7 @@ def main(args=None):
         
         # 3. Call get_choice_range_bearing() and print its result
         try:
-            node.get_logger().info("Calling get_choice_range_bearing()...")
+            # node.get_logger().info("Calling get_choice_range_bearing()...")
             r, b = can_chooser.get_choice_range_bearing()
             node.get_logger().info(
                 f"Main: get_choice_range_bearing() returned: Range={r:.2f}m, Bearing={math.degrees(b):.1f} deg."

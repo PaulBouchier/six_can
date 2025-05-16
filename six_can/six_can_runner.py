@@ -68,7 +68,6 @@ class SixCanRunner(Node):
 
         # Instantiate helper classes
         self.nav2pose = Nav2Pose() # Not a ROS Node, constructor takes no args
-        self.can_chooser = CanChooser(self) # Pass self (the SixCanRunner node)
         self.capture_can = CaptureCan(self) # Pass self (the SixCanRunner node)
 
         self.current_search_pose_index = 0
@@ -196,11 +195,10 @@ class SixCanRunner(Node):
 
             # Inner loop: attempt to find and capture cans at the current_target_search_pose
             while rclpy.ok():
+                self.can_chooser = CanChooser(self) # Pass self (the SixCanRunner node)
                 # Spin a few times to allow CanChooser to process fresh sensor data
                 # (e.g., /can_positions and /odom callbacks)
-                for _ in range(5): # Spin a few times
-                     if not rclpy.ok(): break
-                     rclpy.spin_once(self, timeout_sec=0.1) 
+                self._spin_and_sleep(5.0) # Allow time for can chooser to process and choose a can
                 if not rclpy.ok(): break
 
                 try:
