@@ -7,7 +7,7 @@ package_name = 'six_can'
 setup(
     name=package_name,
     version='0.0.0',
-    packages=find_packages(exclude=['test']),
+    packages=find_packages(),
     data_files=[
         ('share/ament_index/resource_index/packages',
             ['resource/' + package_name]),
@@ -31,8 +31,10 @@ setup(
             'odom_republisher = six_can.odom_republisher:main',
             'capture_can = six_can.capture_can:main',
             'yaml_parser_node = six_can.yaml_parser_node:main',
-            'can_chooser_node = six_can.can_chooser:main', # This line was already present in your example, ensuring it's here.
+            'can_chooser_node = six_can.can_chooser:main', 
             'six_can_runner = six_can.six_can_runner:main',
+            # Add this line for the test client:
+            'can_chooser_test = test.can_chooser_test:main',
         ],
     },
 )
