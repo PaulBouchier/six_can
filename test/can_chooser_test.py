@@ -3,14 +3,14 @@
 import rclpy
 from rclpy.node import Node
 from rclpy.executors import MultiThreadedExecutor
-from six_can_interfaces.srv import CanChooserRpst
+from six_can_interfaces.srv import CanChooserRqst
 import time
 import math # For math.degrees
 
 class CanChooserTestClient(Node):
     def __init__(self):
         super().__init__('can_chooser_test_client')
-        self.client = self.create_client(CanChooserRpst, '/can_chooser_rqst')
+        self.client = self.create_client(CanChooserRqst, '/can_chooser_rqst')
         
         while not self.client.wait_for_service(timeout_sec=1.0):
             self.get_logger().info('Service /can_chooser_rqst not available, waiting again...')
@@ -19,7 +19,7 @@ class CanChooserTestClient(Node):
         self.get_logger().info("CanChooserTestClient started, calling service every 10 seconds.")
 
     async def call_service_and_log(self, choose_flag: bool):
-        req = CanChooserRpst.Request()
+        req = CanChooserRqst.Request()
         req.choose_can = choose_flag
         
         self.get_logger().info(f"Calling service with choose_can = {choose_flag}")
