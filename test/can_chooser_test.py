@@ -2,7 +2,7 @@
 
 import rclpy
 from rclpy.node import Node
-from rclpy.executors import MultiThreadedExecutor
+from rclpy.executors import MultiThreadedExecutor, SingleThreadedExecutor # Import SingleThreadedExecutor
 from six_can_interfaces.srv import CanChooserRqst
 import time
 import math # For math.degrees
@@ -22,29 +22,27 @@ class CanChooserTestClient(Node):
         req = CanChooserRqst.Request()
         req.choose_can = choose_flag
         
-        self.get_logger().info(f"Calling service with choose_can = {choose_flag}")
+        self.get_logger().info(f"call_service_and_log: Calling service with choose_can = {choose_flag}")
         future = self.client.call_async(req)
+        self.get_logger().info(f"call_service_and_log: Service call initiated for choose_can = {choose_flag}. Future: {future}")
         
         try:
-            # Wait for the service call to complete with a timeout
-            # This will spin the node enough for the future to complete
-            await future # This is a more modern way to await futures with async callbacks
+            self.get_logger().info(f"call_service_and_log: Awaiting future for choose_can = {choose_flag}...")
+            response = await future # If successful, `response` gets the result.
+                                    # If the service call fails (e.g. server exception), this raises an exception.
+            self.get_logger().info(f"call_service_and_log: Future completed for choose_can = {choose_flag}. Response: {response}")
             
-            if future.done(): # Redundant if await future succeeded, but good for clarity/error handling
-                response = future.result()
-                if response.can_chosen:
-                    self.get_logger().info(
-                        f"Response (choose_can={choose_flag}): Can chosen. "
-                        f"X: {response.can_x:.2f}, Y: {response.can_y:.2f}, "
-                        f"Range: {response.range:.2f}, Bearing: {math.degrees(response.bearing_rad):.1f} deg"
-                    )
-                else:
-                    self.get_logger().info(f"Response (choose_can={choose_flag}): No can chosen.")
-            # else: # await future would raise an exception if it didn't complete successfully (e.g. timeout if configured)
-            #    self.get_logger().warn(f"Service call (choose_can={choose_flag}) did not complete (future not done).")
+            if response.can_chosen:
+                self.get_logger().info(
+                    f"Response (choose_can={choose_flag}): Can chosen. "
+                    f"X: {response.can_x:.2f}, Y: {response.can_y:.2f}, "
+                    f"Range: {response.range:.2f}, Bearing: {math.degrees(response.bearing_rad):.1f} deg"
+                )
+            else:
+                self.get_logger().info(f"Response (choose_can={choose_flag}): No can chosen.")
 
         except Exception as e:
-            self.get_logger().error(f"Service call (choose_can={choose_flag}) failed: {e!r}")
+            self.get_logger().error(f"call_service_and_log: Service call (choose_can={choose_flag}) failed or future error: {e!r}")
 
     async def run_test_cycle_callback(self): # Renamed to be more descriptive for a timer callback
         self.get_logger().info("--- Starting Test Cycle ---")
@@ -66,8 +64,8 @@ def main(args=None):
     rclpy.init(args=args)
     test_client_node = CanChooserTestClient()
     
-    # Use MultiThreadedExecutor for async callbacks
-    executor = MultiThreadedExecutor()
+    # Use SingleThreadedExecutor for async callbacks (changed from MultiThreadedExecutor for testing)
+    executor = SingleThreadedExecutor()
     executor.add_node(test_client_node)
     
     try:
