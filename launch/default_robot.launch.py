@@ -81,7 +81,7 @@ def generate_launch_description():
         ),
         Node(
             package='six_can',
-            executable='can_chooser',
+            executable='can_chooser_node',
             name='can_chooser',
             output='screen'
         )

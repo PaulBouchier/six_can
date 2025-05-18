@@ -66,7 +66,7 @@ Create the file 'six_can/can_chooser.py' which will contain these classes
     - Subscribe to '/odom' with message type nav_msgs/msg/Odometry
     - Create a publisher to '/can_chooser_debug' with message type six_can_interfaces/msg/CanChooserDebug
     - Provide a service server on '/can_chooser_rqst' with service type
-    six_can_interfaces/srv/CanChooserRpst
+    six_can_interfaces/srv/CanChooserRqst
 ```
 
 2. Create odom callback

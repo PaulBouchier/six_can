@@ -5,7 +5,7 @@ from rclpy.node import Node
 from geometry_msgs.msg import PoseArray, Point, Pose
 from nav_msgs.msg import Odometry
 from six_can_interfaces.msg import CanChooserDebug
-from six_can_interfaces.srv import CanChooserRpst
+from six_can_interfaces.srv import CanChooserRqst
 import math
 import collections
 
@@ -80,7 +80,7 @@ class CanChooser(Node):
             10)
         
         self.choose_can_srv = self.create_service(
-            CanChooserRpst,
+            CanChooserRqst,
             '/can_chooser_rqst',
             self._choose_can_service_callback)
         
@@ -172,7 +172,7 @@ class CanChooser(Node):
             
         self.debug_pub.publish(debug_msg)
 
-    def _choose_can_service_callback(self, request: CanChooserRpst.Request, response: CanChooserRpst.Response):
+    def _choose_can_service_callback(self, request: CanChooserRqst.Request, response: CanChooserRqst.Response):
         if request.choose_can:
             if not self.tracked_cans or not self.current_odom_pose:
                 self.chosen_can_tracker = None 
