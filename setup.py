@@ -33,7 +33,7 @@ setup(
             'yaml_parser_node = six_can.yaml_parser_node:main',
             'can_chooser_node = six_can.can_chooser:main', 
             'six_can_runner = six_can.six_can_runner:main',
-            # Add this line for the test client:
+            'nav2pose = six_can.nav2pose:main',
             'can_chooser_test = test.can_chooser_test:main',
         ],
     },

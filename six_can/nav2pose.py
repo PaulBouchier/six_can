@@ -24,37 +24,18 @@ import math
 Basic navigation demo to go to pose.
 """
 
-class Nav2Pose:
+class Nav2Pose(BasicNavigator):
     def __init__(self):
-        self.navigator = BasicNavigator()
+        super().__init__()
 
     def waitForNav2Active(self):
-        print("Waiting for Nav2 to be active...")
-        self.navigator.waitUntilNav2Active()
-        print("Nav2 is active!")
+        self.get_logger().info("Waiting for Nav2 to be active...")
+        self.waitUntilNav2Active()
+        self.get_logger().info("Nav2 is active!")
         return True
 
-    def waitForComplete(self):
-        try:
-            while not self.navigator.isTaskComplete():
-                feedback = self.navigator.getFeedback()
-        except KeyboardInterrupt:
-            print('Navigation interrupted by user!')
-            self.navigator.cancelTask()
-        finally:
-            result = self.navigator.getResult()
-            if result == TaskResult.SUCCEEDED:
-                print('Goal succeeded!')
-                return True
-            elif result == TaskResult.CANCELED:
-                print('Goal was canceled!')
-            elif result == TaskResult.FAILED:
-                print('Goal failed!')
-            else:
-                print('Goal has an invalid return status!')
-            return False
 
-    def goToPose(self, target_x, target_y, target_orientation):
+    def navToEulerPose(self, target_x, target_y, target_orientation):
         """Navigate the robot to a target pose in the map frame.
         
         This method commands the robot to move to a specified position and orientation
@@ -69,27 +50,35 @@ class Nav2Pose:
         
         Returns:
             bool: True if navigation succeeded, False if it failed or was interrupted
-        
-        Example:
-            >>> navigator = Nav2Pose()
-            >>> # Move to (1.0, 2.0) facing 90 degrees (along +Y axis)
-            >>> success = navigator.goToPose(1.0, 2.0, 90.0)
         """
         target_pose = PoseStamped()
         target_pose.header.frame_id = 'map'
-        target_pose.header.stamp = self.navigator.get_clock().now().to_msg()
+        target_pose.header.stamp = self.get_clock().now().to_msg()
         target_pose.pose.position.x = target_x
         target_pose.pose.position.y = target_y
         target_pose.pose.orientation.w = round(math.cos(math.radians(target_orientation) / 2), 3)
         target_pose.pose.orientation.z = round(math.sin(math.radians(target_orientation) / 2), 3)
-        self.navigator.goToPose(target_pose)
-        rv = self.waitForComplete()
-        if not rv:
-            print('Goal failed to complete!')
+
+        self.goToPose(target_pose)
+
+        try:
+            while not self.isTaskComplete():
+                feedback = self.getFeedback()
+        except KeyboardInterrupt:
+            self.get_logger().info('Navigation interrupted by user!')
+            self.cancelTask()
+        finally:
+            result = self.getResult()
+            if result == TaskResult.SUCCEEDED:
+                self.get_logger().info('Goal succeeded!')
+                return True
+            elif result == TaskResult.CANCELED:
+                self.get_logger().info('Goal was canceled!')
+            elif result == TaskResult.FAILED:
+                self.get_logger().info('Goal failed!')
+            else:
+                self.get_logger().info('Goal has an invalid return status!')
             return False
-        else:
-            print('Goal completed successfully!')
-            return True
 
 def main():
     if len(sys.argv) != 4:
@@ -112,7 +101,7 @@ def main():
     print(f"Navigating to: x={goal_x}, y={goal_y}, orientation={goal_orientation} degrees")
     
     try:
-        nav.goToPose(goal_x, goal_y, goal_orientation)
+        nav.navToEulerPose(goal_x, goal_y, goal_orientation)
     except Exception as e:
         print(f"Navigation failed with error: {e}")
 
