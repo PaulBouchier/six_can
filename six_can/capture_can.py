@@ -1,21 +1,19 @@
 import rclpy
-from rclpy.node import Node
-from rclpy.parameter import Parameter
-from rclpy.executors import SingleThreadedExecutor
-
-from example_interfaces.msg import Int32
-from example_interfaces.srv import SetBool
-from geometry_msgs.msg import Point, Pose # Ensure Pose is explicitly imported
-from nav_msgs.msg import Odometry
 from tf_transformations import euler_from_quaternion
-
 import time
 import math
 import sys
 
+from example_interfaces.msg import Int32
+from example_interfaces.srv import SetBool
+from geometry_msgs.msg import Point, Pose, PoseStamped
+from nav_msgs.msg import Odometry
+from nav2_simple_commander.robot_navigator import BasicNavigator, TaskResult
+
 # Local imports
-from .nav2pose import Nav2Pose
 from scripted_bot_driver.single_move_client import SingleMoveClient
+from .can_chooser_client import CanChooserClient
+
 
 class CaptureCan:
     """
@@ -30,12 +28,12 @@ class CaptureCan:
         DROP_IN_GOAL: Release the can at the goal.
         FAIL_RETREAT: Abort sequence, open jaws, back up, and return to IDLE.
     """
-    def __init__(self, node: Node):
+    def __init__(self, node: BasicNavigator):
         """
         Initialize the CaptureCan class.
 
         Args:
-            node: The ROS2 node to use for communication.
+            node: The ROS2 node to use for communication and navigation.
         """
         self.node = node
         self.logger = self.node.get_logger()
@@ -61,9 +59,9 @@ class CaptureCan:
 
         # Blank forward sector service client
         self.blank_fwd_sector_client = self.node.create_client(SetBool, '/blank_fwd_sector')
+        self.future: Future = None
 
         # Navigation and movement clients
-        self.nav = Nav2Pose()
         self.move_client = SingleMoveClient(self.node)
 
         # State machine variable
@@ -133,39 +131,92 @@ class CaptureCan:
         Returns:
             True if the service call was successful, False otherwise.
         """
+
+        # Check if the service is available and any previous future is done
         if not self.blank_fwd_sector_client.wait_for_service(timeout_sec=2.0):
             self.logger.error('/blank_fwd_sector service not available')
             return False
+        if self.future is not None and not self.future.done():
+            self.future.cancel()  # Cancel the future. The callback will be called with Future.result == None.
+            self.get_logger().info("Service Future canceled. The Node took too long to process the service call."
+                                   "Is the Service Server still alive?")
 
+        # call the service to blank or unblank the forward sector
+        self.logger.info(f"Calling /blank_fwd_sector with value: {value}")
         req = SetBool.Request()
         req.data = value
-        future = self.blank_fwd_sector_client.call_async(req)
+        self.future = self.blank_fwd_sector_client.call_async(req)
+        rclpy.spin_until_future_complete(self.node, self.future)
 
-        # Use executor to spin until future is complete
-        executor = SingleThreadedExecutor()
-        executor.add_node(self.node)
         try:
-             executor.spin_until_future_complete(future, timeout_sec=3.0) # Adjust timeout if needed
-        finally:
-             executor.remove_node(self.node)
-
-
-        if future.done():
-            try:
-                response = future.result()
-                if response.success:
-                    self.logger.info(f"/blank_fwd_sector service call successful (data={value})")
-                    return True
-                else:
-                    self.logger.error(f"/blank_fwd_sector service call failed: {response.message}")
+            if self.future.done():
+                try:
+                    response = self.future.result()
+                    if response.success:
+                        self.logger.info(f"/blank_fwd_sector service call successful (data={value})")
+                        return True
+                    else:
+                        self.logger.error(f"/blank_fwd_sector service call failed: {response.message}")
+                        return False
+                except Exception as e:
+                    self.logger.error(f"Service call failed with exception: {e}")
                     return False
-            except Exception as e:
-                self.logger.error(f"Service call failed with exception: {e}")
+            else:
+                self.logger.error(f"Service call '/blank_fwd_sector' timed out (data={value})")
+                # Attempt to cancel the future? Might not be necessary or effective.
+                self.future.cancel()
                 return False
-        else:
-            self.logger.error(f"Service call '/blank_fwd_sector' timed out (data={value})")
-            # Attempt to cancel the future? Might not be necessary or effective.
-            # future.cancel()
+
+        except Exception as e:
+            self.get_logger().error(f"service_response_callback: Service call failed or future error: {e!r}")
+            return False
+        finally:
+            # Clean up the future to prevent memory leaks
+            self.future = None
+
+    def navToEulerPose(self, target_x, target_y, target_orientation):
+        """Navigate the robot to a target pose in the map frame.
+        
+        This method commands the robot to move to a specified position and orientation
+        in the map frame. It uses ROS 2 Navigation2 (Nav2) for path planning and execution.
+        The method blocks until the navigation is complete or fails.
+        
+        Args:
+            target_x (float): Target X coordinate in meters in the map frame
+            target_y (float): Target Y coordinate in meters in the map frame
+            target_orientation (float): Target orientation in degrees. 0 degrees points along 
+                the positive X axis, and angles increase counterclockwise.
+        
+        Returns:
+            bool: True if navigation succeeded, False if it failed or was interrupted
+        """
+        target_pose = PoseStamped()
+        target_pose.header.frame_id = 'map'
+        target_pose.header.stamp = self.node.get_clock().now().to_msg()
+        target_pose.pose.position.x = target_x
+        target_pose.pose.position.y = target_y
+        target_pose.pose.orientation.w = round(math.cos(math.radians(target_orientation) / 2), 3)
+        target_pose.pose.orientation.z = round(math.sin(math.radians(target_orientation) / 2), 3)
+
+        self.node.goToPose(target_pose)
+
+        try:
+            while not self.node.isTaskComplete():
+                feedback = self.node.getFeedback()
+        except KeyboardInterrupt:
+            self.logger.info('Navigation interrupted by user!')
+            self.node.cancelTask()
+        finally:
+            result = self.node.getResult()
+            if result == TaskResult.SUCCEEDED:
+                self.logger.info('Goal succeeded!')
+                return True
+            elif result == TaskResult.CANCELED:
+                self.logger.info('Goal was canceled!')
+            elif result == TaskResult.FAILED:
+                self.logger.info('Goal failed!')
+            else:
+                self.logger.info('Goal has an invalid return status!')
             return False
 
     # --- State Machine Methods ---
@@ -284,12 +335,7 @@ class CaptureCan:
         """DRIVE2GOAL state: Navigate to the goal location."""
         self.logger.info(f"Navigating to goal: x={self.goal_x}, y={self.goal_y}, orientation=-90.0 deg")
         try:
-            # Ensure Nav2 is ready before commanding
-            # waitForNav2Active might be better placed before starting the whole sequence,
-            # but double-checking here can't hurt if it's quick.
-            # self.nav.waitForNav2Active(timeout_sec=5.0) # Optional check with timeout
-
-            success = self.nav.goToPose(self.goal_x, self.goal_y, -90.0)
+            success = self.navToEulerPose(self.goal_x, self.goal_y, -90.0)
             if success:
                 self.logger.info("Navigation to goal successful.")
                 return 'DROP_IN_GOAL'
@@ -343,7 +389,7 @@ class CaptureCan:
 
     # --- Public Methods ---
 
-    def start_capture(self, target_can_pose: Pose) -> bool: # Modified signature
+    def start_capture(self, target_can_pose: Pose) -> bool:
         """
         Starts the capture sequence state machine for a specific target can.
 
@@ -413,25 +459,15 @@ class CaptureCan:
 def main(args=None):
     """Main function to run the CaptureCan node standalone for testing."""
     rclpy.init(args=args)
-    node = rclpy.create_node('capture_can_node')
-    node.get_logger().info("CaptureCan node starting...")
-
-    # Allow time for node discovery and service/topic setup, especially Nav2
-    node.get_logger().info("Waiting a few seconds for system startup...")
-    time.sleep(3.0) # Simple delay, replace with more robust checks if needed
-
-    capture_can = CaptureCan(node)
+    node = BasicNavigator(node_name='capture_can')
+    node.get_logger().info("capture_can node starting...")
 
     # Wait for Nav2 to become active (CRITICAL!)
     node.get_logger().info("Waiting for Nav2 services to become active...")
-    # Assuming Nav2Pose has waitForNav2Active as shown in example
-    # Need to ensure Nav2Pose spins the node while waiting
-    if not capture_can.nav.waitForNav2Active(): # Generous timeout
-         node.get_logger().error("Nav2 failed to become active. Exiting.")
-         node.destroy_node()
-         rclpy.shutdown()
-         sys.exit(1)
+    node.waitUntilNav2Active()
     node.get_logger().info("Nav2 is active.")
+
+    capture_can = CaptureCan(node)
 
     # Optional: Add checks for other dependencies like move_client services
     # if not capture_can.move_client.wait_for_servers(timeout_sec=5.0):
@@ -441,10 +477,34 @@ def main(args=None):
     #      sys.exit(1)
     # node.get_logger().info("Move client servers are active.")
 
+    can_chooser_client = CanChooserClient(node)
+    node.get_logger().info("Waiting for can chooser service to become available...")
+    while not can_chooser_client.client.wait_for_service(timeout_sec=1.0):
+        node.get_logger().info('Service /can_chooser_rqst not available, waiting again...')
+    node.get_logger().info("Can chooser service is available.")
+    node.get_logger().info("Calling can chooser service to select a can...")
+    can_chosen, chosen_can_pose_odom = can_chooser_client.choose_can()
+    if can_chosen:
+        node.get_logger().info(f"Chosen can pose: x={chosen_can_pose_odom.position.x}, y={chosen_can_pose_odom.position.y}")
+    else:
+        node.get_logger().info("No can chosen. Exiting.")
+        node.destroy_node()
+        rclpy.shutdown()
+        sys.exit(1)
+    node.get_logger().info("Can chooser service call completed.")
+    node.get_logger().info("Calling capture_can.start_capture()...")
+    # Start the capture sequence with the chosen can pose
+    # Note: The chosen can pose is in the odom frame, which is expected by CaptureCan
+    # Ensure the pose is valid before passing it to CaptureCan
+    if chosen_can_pose_odom is None:
+        node.get_logger().error("Chosen can pose is None. Cannot start capture.")
+        node.destroy_node()
+        rclpy.shutdown()
+        sys.exit(1)
 
     node.get_logger().info("Starting capture sequence via start_capture()...")
     try:
-        success = capture_can.start_capture()
+        success = capture_can.start_capture(chosen_can_pose_odom)
 
         if success:
             node.get_logger().info("Main: CaptureCan sequence reported SUCCESS.")
@@ -463,7 +523,7 @@ def main(args=None):
         exit_code = 1 # Treat interrupt as failure/incomplete
 
 
-    node.get_logger().info("Shutting down CaptureCan node.")
+    node.get_logger().info("Shutting down capture_can node.")
     node.destroy_node()
     rclpy.shutdown()
     sys.exit(exit_code)

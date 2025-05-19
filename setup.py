@@ -35,6 +35,7 @@ setup(
             'six_can_runner = six_can.six_can_runner:main',
             'nav2pose = six_can.nav2pose:main',
             'can_chooser_test = test.can_chooser_test:main',
+            'can_chooser_client = six_can.can_chooser_client:main',
         ],
     },
 )

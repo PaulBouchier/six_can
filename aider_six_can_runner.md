@@ -23,7 +23,7 @@ the arena size.
 
 This is the highest level module in a system that moves six soda cans to a goal area.
 It uses the following resources to accomplish the goal:
-- 'Nav2Pose' class to drive the robot to different poses from where
+- 'BasicNavigator' parent class to drive the robot to different poses from where
 'CanTracker.choose_can()' is called to chose a can to grab.
 - 'CaptureCan' class to move to the chosen can and grasp it and carry it to the
 goal, drop it, and return success or fail status
@@ -95,7 +95,8 @@ if __name__ == '__main__':
 
 This file's main() shows how to use the Nav2Pose class, which uses ROS
 Nav2 navigation to drive the robot to the requested pose. Note that
-Nav2pose is not a ROS Node, so do not pass a node to its constructor.
+Nav2pose is a ROS Node because it subclasses the 'BasicNavigator', which
+subclasses 'Node'
 
 ## Mid-level Objective
 
@@ -123,25 +124,31 @@ to move the robot from its current pose to the requested pose
 This class will be a ROS2 node.
 
 ```aider
-Create 'six_can/six_can_runner.py', which is the file that will contain teh SixCanRunner class
+Create 'six_can/six_can_runner.py', which is the file that will contain the SixCanRunner class
 /read-only 'six_can/capture_can.py'
-  - from .nav2pose import Nav2Pose
   - from .capture_can import CaptureCan
-  - from .can_chooser import CanChooser
-  - Define the class SixCanRunner, whose constructor is passed a reference to the
-  node. The constructor should:
+  - from six_can_interfaces.srv import CanChooserRqst
+  - Define the class SixCanRunner, whose constructor calls super.__init__()
+  The constructor should:
     - Get the parameters 'arena_max_x' and 'arena_max_y' which define the maximum extents of the arena.
     The default arena_max_x should be 2.0, default arena_max_y should be 2.0
     - Get the parameter 'search_poses_file' which defines the locations the robot should
     drive to try and find cans. The default should be 'package_share_directory/resource/search_coords.yaml'
     - Read and parse the yaml file containing the list of search poses and save them
     in a list of Pose messages called 'search_poses'. Throw an exception if this operation fails.
+    - Create a service client for the '/can_chooser_rqst' service and check that the service is available
     - Instantiate the 'CaptureCan' class as 'capture_can'
-    - Instantiate the 'Nav2Pose' class as 'nav2pose'
-    - Instantiate the 'CanChooser' class as 'can_chooser'
 ```
 
-2. Drive to search poses, look for cans, capture any found
+2. Define 'choose_can' method
+
+```aider
+Define a method which makes a service call to the '/choose_can_rqst' requesting
+the can chooser node to choose a can. Return the resulting can position as a pose,
+along with a flag which indicates whether a can was chosen
+```
+
+3. Drive to search poses, look for cans, capture any found
 
 Within the arean means that for the current pose, x and y are > 0 and x < arena_max_x
 and y < arena_max_y
@@ -150,11 +157,10 @@ and y < arena_max_y
   - Run the following loop forever. When all poses in the list have been visited,
   start over at the beginning of the list.
     - Drive to the next pose in 'search_poses'
-    - Call spin_once for 1 second, to allow can_chooser to track cans at this location
-    - Check for cans at that location by calling can_chooser.choose_can(). Catch any
-    exception, which means no cans were detected. 'can_chooser.choose_can()' returns the pose in
-    the odom frame of a can that should be captured.
-    - If no cans were detected, drive to the next pose in 'search_poses'
+    - Check for cans at that location by calling 'choose_can()'.
+    - Check that the return status indicates a can was chosen.
+    - 'choose_can()' returns the pose in the odom frame of a can that should be captured.
+    - If no can was chosen, drive to the next pose in 'search_poses'
     - If a can was chosen, call 'capture_can.start_capture()' passing the pose in the odom frame.
     This will grab the can, deposit it in the goal, and leave the robot facing the arena in the goal area.
     - If 'capture_can.start_capture()' returns false, drive to the next location in 'search_poses',

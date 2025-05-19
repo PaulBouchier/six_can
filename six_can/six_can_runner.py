@@ -1,20 +1,22 @@
 import rclpy
-from rclpy.node import Node
-from geometry_msgs.msg import Pose, PoseArray
-from std_msgs.msg import String # For PoseArray subscriber, though String itself isn't used for logic
+from rclpy.executors import MultiThreadedExecutor
 import os
 import yaml
 from ament_index_python.packages import get_package_share_directory
 from tf_transformations import euler_from_quaternion, quaternion_from_euler
 import math
 import time # For potential delays or timing
+from typing import Tuple
 
-from .nav2pose import Nav2Pose
 from .capture_can import CaptureCan
-from .can_chooser import CanChooser
-# YamlParserNode is not instantiated here; SixCanRunner parses its own YAML.
+from .can_chooser_client import CanChooserClient
+from nav2_simple_commander.robot_navigator import BasicNavigator, TaskResult
 
-class SixCanRunner(Node):
+from geometry_msgs.msg import PoseStamped, Pose
+from six_can_interfaces.srv import CanChooserRqst
+
+
+class SixCanRunner(BasicNavigator):
     """
     ROS2 Node to manage the process of finding and moving six cans to a goal area.
     It navigates to predefined search poses, uses CanChooser to identify cans,
@@ -24,7 +26,7 @@ class SixCanRunner(Node):
         """
         Initializes the SixCanRunner node, parameters, helper classes, and loads search poses.
         """
-        super().__init__('six_can_runner')
+        super().__init__(node_name='six_can_runner')
         self.get_logger().info('SixCanRunner node starting...')
 
         # Get parameters for arena size
@@ -34,11 +36,11 @@ class SixCanRunner(Node):
         self.arena_max_y = self.get_parameter('arena_max_y').get_parameter_value().double_value
         self.get_logger().info(f"Arena dimensions: max_x={self.arena_max_x}, max_y={self.arena_max_y}")
 
-        # Get parameter for search poses YAML file
+        # Get parameter for search poses YAML filename
         default_search_poses_path = os.path.join(
-            get_package_share_directory('six_can'), # Assumes package name is 'six_can'
+            get_package_share_directory('six_can'),
             'resource',
-            'search_poses.yaml' # Corrected filename
+            'search_poses.yaml'
         )
         self.declare_parameter('search_poses_file', default_search_poses_path)
         self.search_poses_file_path = self.get_parameter('search_poses_file').get_parameter_value().string_value
@@ -55,16 +57,15 @@ class SixCanRunner(Node):
         except Exception as e:
             self.get_logger().error(f"Failed to initialize SixCanRunner due to YAML parsing error: {e}")
             raise # Re-raise to be caught by main() for shutdown
+        self.current_search_pose_index = 0
 
-        # Declare parameters for can detection and capture
-        self.declare_parameter('can_persistence', 3)
-        self.declare_parameter('can_pose_variance', 0.1)
-
-        # Instantiate helper classes
-        self.nav2pose = Nav2Pose() # Not a ROS Node, constructor takes no args
+        # Instantiate service client for CanChooser service
+        self.get_logger().info("Creating service client for CanChooser...")
+        self.can_chooser_client = CanChooserClient(self) # Pass self (the SixCanRunner node)
+        
+        # Instantiate CaptureCan class
         self.capture_can = CaptureCan(self) # Pass self (the SixCanRunner node)
 
-        self.current_search_pose_index = 0
         self.get_logger().info('SixCanRunner initialization complete.')
 
     def _quaternion_to_yaw(self, quaternion_msg: Pose.orientation) -> float:
@@ -81,7 +82,7 @@ class SixCanRunner(Node):
         The YAML file is expected to contain a 'poses' key, which is a list of lists.
         Each inner list should be [x, y, yaw_degrees].
         """
-        poses = []
+        search_poses = []
         if not os.path.exists(yaml_file_path):
             self.get_logger().error(f"YAML file not found: {yaml_file_path}")
             raise FileNotFoundError(f"YAML file not found: {yaml_file_path}")
@@ -98,68 +99,61 @@ class SixCanRunner(Node):
                 self.get_logger().warn(f"Skipping invalid pose entry: {item}. Expected [x, y, yaw_degrees].")
                 continue
 
-            pose = Pose()
+            search_pose = PoseStamped()
+            search_pose.header.frame_id = 'map'
+            search_pose.header.stamp = self.get_clock().now().to_msg()
             try:
-                pose.position.x = float(item[0])
-                pose.position.y = float(item[1])
-                pose.position.z = 0.0  # Assuming 2D navigation, z is 0
+                search_pose.pose.position.x = float(item[0])
+                search_pose.pose.position.y = float(item[1])
+                search_pose.pose.position.z = 0.0  # Assuming 2D navigation, z is 0
 
                 yaw_degrees = float(item[2])
                 yaw_radians = math.radians(yaw_degrees)
                 q = quaternion_from_euler(0.0, 0.0, yaw_radians)  # roll, pitch, yaw
-                pose.orientation.x = q[0]
-                pose.orientation.y = q[1]
-                pose.orientation.z = q[2]
-                pose.orientation.w = q[3]
-                poses.append(pose)
+                search_pose.pose.orientation.x = q[0]
+                search_pose.pose.orientation.y = q[1]
+                search_pose.pose.orientation.z = q[2]
+                search_pose.pose.orientation.w = q[3]
+                search_poses.append(search_pose)
             except ValueError as e:
                 self.get_logger().warn(f"Skipping pose entry due to conversion error: {item} ({e}).")
         
-        if not poses:
+        if not search_poses:
             self.get_logger().warn(f"No valid poses were loaded from {yaml_file_path}.")
-        return poses
+        return search_poses
 
-    def _navigate_to_pose(self, target_pose: Pose) -> bool:
+    def _navigate_to_pose(self, target_pose: PoseStamped) -> bool:
         """
-        Navigates the robot to the given target_pose using Nav2Pose.
+        Navigates the robot to the given target_pose using BasicNavigator method goToPose.
         Returns True on success, False on failure.
         """
         self.get_logger().info(f"Attempting to navigate to pose: "
-                               f"x={target_pose.position.x:.2f}, y={target_pose.position.y:.2f}")
+                               f"x={target_pose.pose.position.x:.2f}, y={target_pose.pose.position.y:.2f}")
         
-        # Ensure Nav2 is active before commanding. waitForNav2Active is blocking.
-        # Nav2Pose uses print statements; ideally, it would use logging.
-        if not self.nav2pose.waitForNav2Active(): # This might have its own timeout or block indefinitely
-            self.get_logger().error("Nav2 is not active. Cannot navigate.")
+        # Ensure Nav2 is active before commanding.
+        self.waitUntilNav2Active()
+
+        # Command BasicNavigator superclass to go to the desired pose
+        self.goToPose(target_pose)
+
+        try:
+            while not self.isTaskComplete():
+                feedback = self.getFeedback()
+        except KeyboardInterrupt:
+            self.get_logger().info('Navigation interrupted by user!')
+            self.cancelTask()
+        finally:
+            result = self.getResult()
+            if result == TaskResult.SUCCEEDED:
+                self.get_logger().info('Goal succeeded!')
+                return True
+            elif result == TaskResult.CANCELED:
+                self.get_logger().info('Goal was canceled!')
+            elif result == TaskResult.FAILED:
+                self.get_logger().info('Goal failed!')
+            else:
+                self.get_logger().info('Goal has an invalid return status!')
             return False
-
-        yaw_rad = self._quaternion_to_yaw(target_pose.orientation)
-        yaw_deg = math.degrees(yaw_rad)
-        
-        self.get_logger().info(f"Commanding Nav2: x={target_pose.position.x:.2f}, "
-                               f"y={target_pose.position.y:.2f}, yaw={yaw_deg:.1f} degrees")
-        success = self.nav2pose.goToPose(target_pose.position.x, target_pose.position.y, yaw_deg)
-        
-        if success:
-            self.get_logger().info("Navigation to pose reported success.")
-        else:
-            self.get_logger().warn("Navigation to pose reported failure or was cancelled.")
-        return success
-
-    def choose_can(self) -> Pose:
-        """
-        Uses CanChooser to select a can from the detected cans.
-        Returns the chosen can's pose.
-        """
-        can_chooser = CanChooser(self)
-        self._spin_and_sleep(5.0) # Allow time for can chooser to process and choose a can
-
-        chosen_can_pose_odom = can_chooser.choose_can() # Raises RuntimeError if no can
-        self.get_logger().info(f"Can chosen at odom coordinates: "
-                                f"x={chosen_can_pose_odom.position.x:.2f}, "
-                                f"y={chosen_can_pose_odom.position.y:.2f}")
-        can_chooser.unsubscribe() # Clean up CanChooser instance
-        return chosen_can_pose_odom
 
     def run_mission(self):
         """
@@ -171,9 +165,7 @@ class SixCanRunner(Node):
             return
 
         self.get_logger().info("Waiting for Nav2 to become active before starting mission loop...")
-        if not self.nav2pose.waitForNav2Active():
-            self.get_logger().error("Nav2 failed to become active. Aborting mission.")
-            return
+        self.waitUntilNav2Active()
         self.get_logger().info("Nav2 is active. Starting mission loop...")
 
         while rclpy.ok():
@@ -195,42 +187,36 @@ class SixCanRunner(Node):
             # Inner loop: attempt to find and capture cans at the current_target_search_pose
             while rclpy.ok():
 
-                try:
-                    self.get_logger().info("Attempting to choose a can...")
-                    chosen_can_pose_odom = self.choose_can() # Raises RuntimeError if no can
-
-                    # A can was chosen, now try to capture it
-                    self.get_logger().info("Attempting to capture the chosen can...")
-                    # CaptureCan.start_capture is blocking and returns True on success
-                    capture_success = self.capture_can.start_capture(chosen_can_pose_odom)
-
-                    if capture_success:
-                        self.get_logger().info("Successfully captured and delivered can.")
-                        # Robot is now in goal area. Navigate back to the *same* search pose
-                        # to check for more cans at this location.
-                        self.get_logger().info("Returning to current search pose to check for more cans.")
-                        if not self._navigate_to_pose(current_target_search_pose):
-                            self.get_logger().warn("Failed to navigate back to current search pose after capture. "
-                                                   "Moving to next search pose in list.")
-                            break # Exit inner loop, move to next search pose in outer loop
-                        self.get_logger().info("Arrived back at search pose. Looking for more cans...")
-                        # Continue in this inner loop (while rclpy.ok():) to find more cans
-                        # at current_target_search_pose
-                    else:
-                        self.get_logger().warn("Failed to capture/deliver chosen can. "
-                                               "Moving to next search pose in list.")
-                        break # Exit inner loop, move to next search pose in outer loop
-
-                except RuntimeError as e:
-                    # This exception typically means CanChooser.choose_can() found no suitable cans
-                    self.get_logger().info(f"No suitable cans found at current search pose (or error in choose_can): {str(e)}")
+                self.get_logger().info("Attempting to choose a can...")
+                can_chosen, chosen_can_pose_odom = self.can_chooser_client.choose_can()
+                if not can_chosen:
+                    # CanChooser.choose_can() found no suitable cans
+                    self.get_logger().info(f"No suitable cans found at current search pose")
                     self.get_logger().info("Moving to next search pose in list.")
                     break # Exit inner loop, move to next search pose in outer loop
-                except Exception as e:
-                    self.get_logger().error(f"Unexpected error during can choosing/capturing: {e}", exc_info=True)
-                    self.get_logger().info("Due to unexpected error, moving to next search pose in list.")
-                    break # Exit inner loop on unexpected error
-            
+
+                # A can was chosen, now try to capture it
+                self.get_logger().info("Attempting to capture the chosen can...")
+                # CaptureCan.start_capture is blocking and returns True on success
+                capture_success = self.capture_can.start_capture(chosen_can_pose_odom)
+
+                if capture_success:
+                    self.get_logger().info("Successfully captured and delivered can.")
+                    # Robot is now in goal area. Navigate back to the *same* search pose
+                    # to check for more cans at this location.
+                    self.get_logger().info("Returning to current search pose to check for more cans.")
+                    if not self._navigate_to_pose(current_target_search_pose):
+                        self.get_logger().warn("Failed to navigate back to current search pose after capture. "
+                                                "Moving to next search pose in list.")
+                        break # Exit inner loop, move to next search pose in outer loop
+                    self.get_logger().info("Arrived back at search pose. Looking for more cans...")
+                    # Continue in this inner loop (while rclpy.ok():) to find more cans
+                    # at current_target_search_pose
+                else:
+                    self.get_logger().warn("Failed to capture/deliver chosen can. "
+                                            "Moving to next search pose in list.")
+                    break # Exit inner loop, move to next search pose in outer loop
+
             if not rclpy.ok():
                 self.get_logger().info("ROS shutdown requested, exiting mission loop.")
                 break # Exit outer (while rclpy.ok():) loop
@@ -256,6 +242,8 @@ def main(args=None):
     six_can_runner_node = None
     try:
         six_can_runner_node = SixCanRunner()
+        executor = MultiThreadedExecutor()
+        executor.add_node(six_can_runner_node)
         # run_mission contains the main operational loop and internal spinning.
         six_can_runner_node.run_mission()
     except KeyboardInterrupt:
