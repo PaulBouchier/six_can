@@ -29,17 +29,17 @@ class SixCanRunner(BasicNavigator):
         super().__init__(node_name='six_can_runner')
         self.get_logger().info('SixCanRunner node starting...')
 
-        # Get parameters for arena size
-        self.declare_parameter('arena_max_x', 2.0)
-        self.declare_parameter('arena_max_y', 2.0)
+        # Get parameters for arena size - unused for now
+        self.declare_parameter('arena_max_x', 2.2)
+        self.declare_parameter('arena_max_y', 3.2)
         self.arena_max_x = self.get_parameter('arena_max_x').get_parameter_value().double_value
         self.arena_max_y = self.get_parameter('arena_max_y').get_parameter_value().double_value
-        self.get_logger().info(f"Arena dimensions: max_x={self.arena_max_x}, max_y={self.arena_max_y}")
+        # self.get_logger().info(f"Arena dimensions: max_x={self.arena_max_x}, max_y={self.arena_max_y}")
 
         # Get parameter for search poses YAML filename
         default_search_poses_path = os.path.join(
             get_package_share_directory('six_can'),
-            'resource',
+            'config',
             'search_poses.yaml'
         )
         self.declare_parameter('search_poses_file', default_search_poses_path)

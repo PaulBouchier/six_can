@@ -23,8 +23,8 @@ from launch_ros.actions import Node
 from launch.conditions import IfCondition, UnlessCondition
 
 
-MAP_NAME='TestArena'
-#MAP_NAME='SixCanArena'
+#MAP_NAME='TestArena'
+MAP_NAME='SixCanArena'
 
 def generate_launch_description():
     depth_sensor = os.getenv('LINOROBOT2_DEPTH_SENSOR', '')
@@ -41,8 +41,12 @@ def generate_launch_description():
         [FindPackageShare('six_can'), 'maps', f'{MAP_NAME}.yaml']
     )
 
+    #nav2_config_path = PathJoinSubstitution(
+    #    [FindPackageShare('linorobot2_navigation'), 'config', 'navigation.yaml']
+    #)
+
     nav2_config_path = PathJoinSubstitution(
-        [FindPackageShare('linorobot2_navigation'), 'config', 'navigation.yaml']
+        [FindPackageShare('six_can'), 'config', 'nav2_params.yaml']
     )
 
     nav2_sim_config_path = PathJoinSubstitution(

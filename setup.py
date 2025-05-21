@@ -12,12 +12,11 @@ setup(
         ('share/ament_index/resource_index/packages',
             ['resource/' + package_name]),
         ('share/' + package_name, ['package.xml']),
-        # Include all launch, map, rviz files.
+        # Include all launch, map, rviz, config files.
         (os.path.join('share', package_name, 'launch'), glob('launch/*')),
         (os.path.join('share', package_name, 'maps'), glob('maps/*')),
         (os.path.join('share', package_name, 'rviz'), glob('rviz/*')),
         (os.path.join('share', package_name, 'config'), glob('config/*')),
-        ('share/' + package_name + '/resource', ['resource/search_poses.yaml']),
     ],
     install_requires=['setuptools'],
     zip_safe=True,
@@ -36,6 +35,7 @@ setup(
             'nav2pose = six_can.nav2pose:main',
             'can_chooser_test = test.can_chooser_test:main',
             'can_chooser_client = six_can.can_chooser_client:main',
+            'test_nav_and_move = test.test_nav_and_move:main',
         ],
     },
 )
