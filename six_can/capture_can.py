@@ -40,7 +40,7 @@ class CaptureCan:
 
         # Declare and get parameters
         self.node.declare_parameter('goal_x', 1.1)
-        self.node.declare_parameter('goal_y', -0.1)
+        self.node.declare_parameter('goal_y', -0.2)
         self.goal_x = self.node.get_parameter('goal_x').get_parameter_value().double_value
         self.goal_y = self.node.get_parameter('goal_y').get_parameter_value().double_value
         self.logger.info(f"Goal position set to: x={self.goal_x}, y={self.goal_y}")
@@ -354,7 +354,7 @@ class CaptureCan:
 
         self.logger.info("Backing up 0.15m.")
         # Failure here is less critical, but log it.
-        if not self.move_client.execute_move('drive_straight_odom', ['-0.15']):
+        if not self.move_client.execute_move('drive_straight_odom', ['-0.4']):
              self.logger.warn("Post-drop backup move failed.")
 
         self.logger.info("Clearing forward sector blanking.")
