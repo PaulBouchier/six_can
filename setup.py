@@ -35,7 +35,9 @@ setup(
             'nav2pose = six_can.nav2pose:main',
             'can_chooser_test = test.can_chooser_test:main',
             'can_chooser_client = six_can.can_chooser_client:main',
+            'basic_navigator_child = six_can.BasicNavigatorChild:main',
             'test_nav_and_move = test.test_nav_and_move:main',
+            'jaws = six_can.jaws:main',
         ],
     },
 )

@@ -1,4 +1,5 @@
 import rclpy
+from rclpy.executors import MultiThreadedExecutor
 from tf_transformations import euler_from_quaternion
 import time
 import math
@@ -13,6 +14,7 @@ from nav2_simple_commander.robot_navigator import BasicNavigator, TaskResult
 # Local imports
 from scripted_bot_driver.single_move_client import SingleMoveClient
 from .can_chooser_client import CanChooserClient
+from .basic_navigator_child import BasicNavigatorChild
 
 
 class CaptureCan:
@@ -28,7 +30,7 @@ class CaptureCan:
         DROP_IN_GOAL: Release the can at the goal.
         FAIL_RETREAT: Abort sequence, open jaws, back up, and return to IDLE.
     """
-    def __init__(self, node: BasicNavigator):
+    def __init__(self, node: BasicNavigatorChild, mt_executor):
         """
         Initialize the CaptureCan class.
 
@@ -36,6 +38,7 @@ class CaptureCan:
             node: The ROS2 node to use for communication and navigation.
         """
         self.node = node
+        self.mt_executor = mt_executor
         self.logger = self.node.get_logger()
 
         # Declare and get parameters
@@ -117,7 +120,7 @@ class CaptureCan:
         start_time = self.node.get_clock().now()
         duration = rclpy.duration.Duration(seconds=seconds)
         while rclpy.ok() and (self.node.get_clock().now() - start_time) < duration:
-            rclpy.spin_once(self.node, timeout_sec=0.05)
+            self.mt_executor.spin_once(timeout_sec=0.01)  # Spin the executor to process callbacks
             # Optional small Python sleep to prevent high CPU usage if needed
             # time.sleep(0.01)
 
@@ -459,15 +462,20 @@ class CaptureCan:
 def main(args=None):
     """Main function to run the CaptureCan node standalone for testing."""
     rclpy.init(args=args)
-    node = BasicNavigator(node_name='capture_can')
+
+    node = BasicNavigatorChild(node_name='capture_can')
     node.get_logger().info("capture_can node starting...")
+
+    # Create a MultiThreadedExecutor for handling multiple threads
+    mt_executor = MultiThreadedExecutor()
+    mt_executor.add_node(node)
 
     # Wait for Nav2 to become active (CRITICAL!)
     node.get_logger().info("Waiting for Nav2 services to become active...")
     node.waitUntilNav2Active()
     node.get_logger().info("Nav2 is active.")
 
-    capture_can = CaptureCan(node)
+    capture_can = CaptureCan(node, mt_executor)
 
     # Optional: Add checks for other dependencies like move_client services
     # if not capture_can.move_client.wait_for_servers(timeout_sec=5.0):

@@ -10,24 +10,27 @@ from typing import Tuple
 
 from .capture_can import CaptureCan
 from .can_chooser_client import CanChooserClient
+from .basic_navigator_child import BasicNavigatorChild
 from nav2_simple_commander.robot_navigator import BasicNavigator, TaskResult
 
 from geometry_msgs.msg import PoseStamped, Pose
 from six_can_interfaces.srv import CanChooserRqst
 
 
-class SixCanRunner(BasicNavigator):
+class SixCanRunner(BasicNavigatorChild):
     """
     ROS2 Node to manage the process of finding and moving six cans to a goal area.
     It navigates to predefined search poses, uses CanChooser to identify cans,
     and CaptureCan to retrieve and deposit them.
     """
-    def __init__(self):
+    def __init__(self, mt_executor):
         """
         Initializes the SixCanRunner node, parameters, helper classes, and loads search poses.
         """
         super().__init__(node_name='six_can_runner')
         self.get_logger().info('SixCanRunner node starting...')
+        self.mt_executor = mt_executor
+        self.mt_executor.add_node(self)
 
         # Get parameters for arena size - unused for now
         self.declare_parameter('arena_max_x', 2.2)
@@ -64,7 +67,7 @@ class SixCanRunner(BasicNavigator):
         self.can_chooser_client = CanChooserClient(self) # Pass self (the SixCanRunner node)
         
         # Instantiate CaptureCan class
-        self.capture_can = CaptureCan(self) # Pass self (the SixCanRunner node)
+        self.capture_can = CaptureCan(self, self.mt_executor) # Pass self (the SixCanRunner node)
 
         self.get_logger().info('SixCanRunner initialization complete.')
 
@@ -233,17 +236,17 @@ class SixCanRunner(BasicNavigator):
         start_time = self.get_clock().now()
         end_time = start_time + rclpy.duration.Duration(seconds=duration_sec)
         while rclpy.ok() and self.get_clock().now() < end_time:
-            rclpy.spin_once(self, timeout_sec=0.05) # Process callbacks
-            time.sleep(0.01) # Python sleep to yield CPU
+            self.mt_executor.spin_once(timeout_sec=0.01) # Process callbacks
+            #time.sleep(0.01) # Python sleep to yield CPU
 
 
 def main(args=None):
     rclpy.init(args=args)
     six_can_runner_node = None
     try:
-        six_can_runner_node = SixCanRunner()
-        executor = MultiThreadedExecutor()
-        executor.add_node(six_can_runner_node)
+        mt_executor = MultiThreadedExecutor()
+        six_can_runner_node = SixCanRunner(mt_executor)
+
         # run_mission contains the main operational loop and internal spinning.
         six_can_runner_node.run_mission()
     except KeyboardInterrupt:
