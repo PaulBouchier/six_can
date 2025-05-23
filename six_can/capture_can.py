@@ -43,7 +43,7 @@ class CaptureCan:
 
         # Declare and get parameters
         self.node.declare_parameter('goal_x', 1.1)
-        self.node.declare_parameter('goal_y', -0.2)
+        self.node.declare_parameter('goal_y', -0.25)
         self.goal_x = self.node.get_parameter('goal_x').get_parameter_value().double_value
         self.goal_y = self.node.get_parameter('goal_y').get_parameter_value().double_value
         self.logger.info(f"Goal position set to: x={self.goal_x}, y={self.goal_y}")
