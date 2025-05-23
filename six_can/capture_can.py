@@ -206,6 +206,16 @@ class CaptureCan:
         try:
             while not self.node.isTaskComplete():
                 feedback = self.node.getFeedback()
+                print(
+                'Estimated time of arrival: '
+                + '{0:.0f}'.format(
+                    Duration.from_msg(feedback.estimated_time_remaining).nanoseconds
+                    / 1e9
+                )
+                + ' seconds.'
+                )
+                time.sleep(1.0)
+
         except KeyboardInterrupt:
             self.logger.info('Navigation interrupted by user!')
             self.node.cancelTask()
