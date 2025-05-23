@@ -1,7 +1,6 @@
 import rclpy
 from rclpy.executors import MultiThreadedExecutor
 from tf_transformations import euler_from_quaternion
-import time
 import math
 import sys
 
@@ -9,12 +8,13 @@ from example_interfaces.msg import Int32
 from example_interfaces.srv import SetBool
 from geometry_msgs.msg import Point, Pose, PoseStamped
 from nav_msgs.msg import Odometry
-from nav2_simple_commander.robot_navigator import BasicNavigator, TaskResult
+from nav2_simple_commander.robot_navigator import TaskResult
 
 # Local imports
 from scripted_bot_driver.single_move_client import SingleMoveClient
 from .can_chooser_client import CanChooserClient
-from .basic_navigator_child import BasicNavigatorChild
+from .six_can_navigator import SixCanNavigator
+from .move_node import MoveNode
 
 
 class CaptureCan:
@@ -30,42 +30,45 @@ class CaptureCan:
         DROP_IN_GOAL: Release the can at the goal.
         FAIL_RETREAT: Abort sequence, open jaws, back up, and return to IDLE.
     """
-    def __init__(self, node: BasicNavigatorChild, mt_executor):
+    def __init__(self, nav_node: SixCanNavigator, move_node: MoveNode, mt_executor: MultiThreadedExecutor):
         """
         Initialize the CaptureCan class.
 
         Args:
-            node: The ROS2 node to use for communication and navigation.
+            six_can_navigator: The ROS2 node to use for navigation.
+            move_node: The ROS2 node to use for executing moves.
+            mt_executor: The MultiThreadedExecutor to use for spinning the node.
         """
-        self.node = node
+        self.nav_node = nav_node
+        self.move_node = move_node
         self.mt_executor = mt_executor
-        self.logger = self.node.get_logger()
+        self.logger = self.nav_node.get_logger()
 
         # Declare and get parameters
-        self.node.declare_parameter('goal_x', 1.1)
-        self.node.declare_parameter('goal_y', -0.2)
-        self.goal_x = self.node.get_parameter('goal_x').get_parameter_value().double_value
-        self.goal_y = self.node.get_parameter('goal_y').get_parameter_value().double_value
+        self.nav_node.declare_parameter('goal_x', 1.1)
+        self.nav_node.declare_parameter('goal_y', -0.2)
+        self.goal_x = self.nav_node.get_parameter('goal_x').get_parameter_value().double_value
+        self.goal_y = self.nav_node.get_parameter('goal_y').get_parameter_value().double_value
         self.logger.info(f"Goal position set to: x={self.goal_x}, y={self.goal_y}")
 
         # Servo publisher
-        self.servo_pub = self.node.create_publisher(Int32, '/servo', 10)
+        self.servo_pub = self.nav_node.create_publisher(Int32, '/servo', 10)
 
         # Closest can subscriber
         self.range = None
         self.bearing = None
-        self.closest_can_sub = self.node.create_subscription(
+        self.closest_can_sub = self.nav_node.create_subscription(
             Point,
             '/closest_range_bearing',
             self._closest_can_callback,
             10)
 
         # Blank forward sector service client
-        self.blank_fwd_sector_client = self.node.create_client(SetBool, '/blank_fwd_sector')
+        self.blank_fwd_sector_client = self.nav_node.create_client(SetBool, '/blank_fwd_sector')
         self.future: Future = None
 
-        # Navigation and movement clients
-        self.move_client = SingleMoveClient(self.node)
+        # Directed move clients
+        self.move_client = SingleMoveClient(self.move_node)
 
         # State machine variable
         self.capture_sm_state = 'IDLE'
@@ -75,7 +78,7 @@ class CaptureCan:
         self.current_robot_pose = None # Will store the robot's current pose from /odom
 
         # Add odom subscriber
-        self.odom_sub = self.node.create_subscription(
+        self.odom_sub = self.nav_node.create_subscription(
             Odometry,
             '/odom',
             self._odom_callback,
@@ -117,9 +120,9 @@ class CaptureCan:
 
     def _ros_sleep(self, seconds):
         """Sleeps for a given duration while spinning the ROS node."""
-        start_time = self.node.get_clock().now()
+        start_time = self.nav_node.get_clock().now()
         duration = rclpy.duration.Duration(seconds=seconds)
-        while rclpy.ok() and (self.node.get_clock().now() - start_time) < duration:
+        while rclpy.ok() and (self.nav_node.get_clock().now() - start_time) < duration:
             self.mt_executor.spin_once(timeout_sec=0.01)  # Spin the executor to process callbacks
             # Optional small Python sleep to prevent high CPU usage if needed
             # time.sleep(0.01)
@@ -149,7 +152,7 @@ class CaptureCan:
         req = SetBool.Request()
         req.data = value
         self.future = self.blank_fwd_sector_client.call_async(req)
-        rclpy.spin_until_future_complete(self.node, self.future)
+        rclpy.spin_until_future_complete(self.nav_node, self.future)
 
         try:
             if self.future.done():
@@ -195,22 +198,22 @@ class CaptureCan:
         """
         target_pose = PoseStamped()
         target_pose.header.frame_id = 'map'
-        target_pose.header.stamp = self.node.get_clock().now().to_msg()
+        target_pose.header.stamp = self.nav_node.get_clock().now().to_msg()
         target_pose.pose.position.x = target_x
         target_pose.pose.position.y = target_y
         target_pose.pose.orientation.w = round(math.cos(math.radians(target_orientation) / 2), 3)
         target_pose.pose.orientation.z = round(math.sin(math.radians(target_orientation) / 2), 3)
 
-        self.node.goToPose(target_pose)
+        self.nav_node.goToPose(target_pose)
 
         try:
-            while not self.node.isTaskComplete():
-                feedback = self.node.getFeedback()
+            while not self.nav_node.isTaskComplete():
+                feedback = self.nav_node.getFeedback()
         except KeyboardInterrupt:
             self.logger.info('Navigation interrupted by user!')
-            self.node.cancelTask()
+            self.nav_node.cancelTask()
         finally:
-            result = self.node.getResult()
+            result = self.nav_node.getResult()
             if result == TaskResult.SUCCEEDED:
                 self.logger.info('Goal succeeded!')
                 return True
@@ -280,7 +283,7 @@ class CaptureCan:
         self.logger.info(f"Target can pose: x={can_x:.2f}, y={can_y:.2f}")
         self.logger.info(f"Angle to can: {math.degrees(angle_to_can):.1f} deg. Rotation needed: {math.degrees(rotation_amount_rad):.1f} deg.")
 
-        # The 'rotate_odom' command likely expects radians
+        # The 'rotate_odom' command expects radians
         success = self.move_client.execute_move('rotate_odom', [str(rotation_amount_rad)])
 
         if success:
@@ -463,76 +466,76 @@ def main(args=None):
     """Main function to run the CaptureCan node standalone for testing."""
     rclpy.init(args=args)
 
-    node = BasicNavigatorChild(node_name='capture_can')
-    node.get_logger().info("capture_can node starting...")
-
     # Create a MultiThreadedExecutor for handling multiple threads
-    mt_executor = MultiThreadedExecutor()
-    mt_executor.add_node(node)
+    mt_executor = MultiThreadedExecutor(num_threads=4)
+
+    nav_node = SixCanNavigator(mt_executor)
+    nav_node.get_logger().info("navigator node starting...")
+
+    move_node = MoveNode(mt_executor)
+    move_node.get_logger().info("move node starting...")
+
+    mt_executor.add_node(nav_node)
+    mt_executor.add_node(move_node)
 
     # Wait for Nav2 to become active (CRITICAL!)
-    node.get_logger().info("Waiting for Nav2 services to become active...")
-    node.waitUntilNav2Active()
-    node.get_logger().info("Nav2 is active.")
+    nav_node.get_logger().info("Waiting for Nav2 services to become active...")
+    nav_node.waitUntilNav2Active()
+    nav_node.get_logger().info("Nav2 is active.")
 
-    capture_can = CaptureCan(node, mt_executor)
+    capture_can = CaptureCan(nav_node, move_node, mt_executor)
 
-    # Optional: Add checks for other dependencies like move_client services
-    # if not capture_can.move_client.wait_for_servers(timeout_sec=5.0):
-    #      node.get_logger().error("Move client action servers not available. Exiting.")
-    #      node.destroy_node()
-    #      rclpy.shutdown()
-    #      sys.exit(1)
-    # node.get_logger().info("Move client servers are active.")
-
-    can_chooser_client = CanChooserClient(node)
-    node.get_logger().info("Waiting for can chooser service to become available...")
+    can_chooser_client = CanChooserClient(nav_node)
+    nav_node.get_logger().info("Waiting for can chooser service to become available...")
     while not can_chooser_client.client.wait_for_service(timeout_sec=1.0):
-        node.get_logger().info('Service /can_chooser_rqst not available, waiting again...')
-    node.get_logger().info("Can chooser service is available.")
-    node.get_logger().info("Calling can chooser service to select a can...")
+        nav_node.get_logger().info('Service /can_chooser_rqst not available, waiting again...')
+    nav_node.get_logger().info("Can chooser service is available.")
+    nav_node.get_logger().info("Calling can chooser service to select a can...")
     can_chosen, chosen_can_pose_odom = can_chooser_client.choose_can()
     if can_chosen:
-        node.get_logger().info(f"Chosen can pose: x={chosen_can_pose_odom.position.x}, y={chosen_can_pose_odom.position.y}")
+        nav_node.get_logger().info(f"Chosen can pose: x={chosen_can_pose_odom.position.x}, y={chosen_can_pose_odom.position.y}")
     else:
-        node.get_logger().info("No can chosen. Exiting.")
-        node.destroy_node()
+        nav_node.get_logger().info("No can chosen. Exiting.")
+        nav_node.destroy_node()
+        move_node.destroy_node()
         rclpy.shutdown()
         sys.exit(1)
-    node.get_logger().info("Can chooser service call completed.")
-    node.get_logger().info("Calling capture_can.start_capture()...")
+    nav_node.get_logger().info("Can chooser service call completed.")
+    nav_node.get_logger().info("Calling capture_can.start_capture()...")
     # Start the capture sequence with the chosen can pose
     # Note: The chosen can pose is in the odom frame, which is expected by CaptureCan
     # Ensure the pose is valid before passing it to CaptureCan
     if chosen_can_pose_odom is None:
-        node.get_logger().error("Chosen can pose is None. Cannot start capture.")
-        node.destroy_node()
+        nav_node.get_logger().error("Chosen can pose is None. Cannot start capture.")
+        nav_node.destroy_node()
+        move_node.destroy_node()
         rclpy.shutdown()
         sys.exit(1)
 
-    node.get_logger().info("Starting capture sequence via start_capture()...")
+    nav_node.get_logger().info("Starting capture sequence via start_capture()...")
     try:
         success = capture_can.start_capture(chosen_can_pose_odom)
 
         if success:
-            node.get_logger().info("Main: CaptureCan sequence reported SUCCESS.")
+            nav_node.get_logger().info("Main: CaptureCan sequence reported SUCCESS.")
             exit_code = 0
         else:
-            node.get_logger().error("Main: CaptureCan sequence reported FAILURE.")
+            nav_node.get_logger().error("Main: CaptureCan sequence reported FAILURE.")
             exit_code = 1
 
     except Exception as e:
-        node.get_logger().fatal(f"Unhandled exception during capture sequence: {e}")
+        nav_node.get_logger().fatal(f"Unhandled exception during capture sequence: {e}")
         import traceback
         traceback.print_exc()
         exit_code = 2
     except KeyboardInterrupt:
-        node.get_logger().info("Ctrl+C caught, shutting down.")
+        nav_node.get_logger().info("Ctrl+C caught, shutting down.")
         exit_code = 1 # Treat interrupt as failure/incomplete
 
 
-    node.get_logger().info("Shutting down capture_can node.")
-    node.destroy_node()
+    nav_node.get_logger().info("Shutting down capture_can nodes.")
+    nav_node.destroy_node()
+    move_node.destroy_node()
     rclpy.shutdown()
     sys.exit(exit_code)
 

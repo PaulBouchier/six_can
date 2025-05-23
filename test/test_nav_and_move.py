@@ -12,7 +12,8 @@ import math
 import time # For potential delays or timing
 from typing import Tuple
 
-from nav2_simple_commander.robot_navigator import BasicNavigator, TaskResult
+from nav2_simple_commander.robot_navigator import TaskResult
+from six_can.basic_navigator_child import BasicNavigatorChild
 
 from geometry_msgs.msg import PoseStamped, Pose
 from scripted_bot_driver import single_move_client
@@ -21,9 +22,8 @@ from scripted_bot_driver import single_move_client
 class RunningTask(Enum):
     NONE = 0
     NAVIGATE_TO_POSE = 1
-    TEST_MOVES = 2
 
-class NavNode(BasicNavigator):
+class NavNode(BasicNavigatorChild):
     """
     ROS2 Node to manage the process of navigating to a series of poses.
     It navigates to predefined search poses
@@ -174,7 +174,6 @@ def run_loops():
     Main operational loop for the NavNode.
     Iterates through search poses
     """
-    #global nav_node
     running_task = RunningTask.NONE
 
     while rclpy.ok():
