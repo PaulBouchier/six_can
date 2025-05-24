@@ -40,17 +40,29 @@ class SingleMoveClient():
             try:
                 self.executor.add_node(self.node)
                 self.logger.info(
-                    f"Node '{self.node.get_name()}' was added to the provided executor by SingleMoveClient."
+                    f"Node '{self.node.get_name()}' (id: {id(self.node)}) was added to the provided executor (id: {id(self.executor)}) by SingleMoveClient."
                 )
             except Exception as e:
                 self.logger.error(
-                    f"Failed to add node '{self.node.get_name()}' to executor in SingleMoveClient: {e}. "
+                    f"Failed to add node '{self.node.get_name()}' (id: {id(self.node)}) to executor (id: {id(self.executor)}) in SingleMoveClient: {e}. "
                     "Callbacks may not work."
                 )
         else:
             self.logger.info(
-                f"Node '{self.node.get_name()}' is already managed by the provided executor."
+                f"Node '{self.node.get_name()}' (id: {id(self.node)}) is already managed by the provided executor (id: {id(self.executor)})."
             )
+
+        # Log the state of the executor after __init__'s logic
+        try:
+            nodes_in_executor_after_init = self.executor.get_nodes()
+            node_names_in_executor_after_init = [n.get_name() for n in nodes_in_executor_after_init]
+            is_present_after_init = self.node in nodes_in_executor_after_init
+            self.logger.info(
+                f"INIT_POST_ADD: Executor (id: {id(self.executor)}) managed nodes: {node_names_in_executor_after_init}. "
+                f"Target node '{self.node.get_name()}' (id: {id(self.node)}) in list: {is_present_after_init}"
+            )
+        except Exception as e:
+            self.logger.error(f"INIT_POST_ADD: Error getting nodes from executor: {e}")
 
         # Action clients
         self.clients = {
@@ -86,18 +98,30 @@ class SingleMoveClient():
         self.logger.info(f"Executing move: {move_type} {move_spec}")
 
         # Diagnostic check for node-executor association
+        self.logger.info(f"EXEC_MOVE_PRE_CHECK: Target node '{self.node.get_name()}' (id: {id(self.node)}), Executor (id: {id(self.executor)})")
         try:
-            if self.node not in self.executor.get_nodes():
+            current_nodes_in_executor = self.executor.get_nodes()
+            current_node_names_in_executor = [n.get_name() for n in current_nodes_in_executor]
+            self.logger.info(
+                f"EXEC_MOVE_PRE_CHECK: Executor (id: {id(self.executor)}) currently manages nodes (names): {current_node_names_in_executor}"
+            )
+            # For detailed debugging, let's see the raw node objects and their IDs from the executor's list
+            # This can be verbose, so consider removing or commenting out if logs are too noisy.
+            # for i, exec_node in enumerate(current_nodes_in_executor):
+            #     self.logger.info(f"EXEC_MOVE_PRE_CHECK: Executor node {i}: name='{exec_node.get_name()}', id={id(exec_node)}")
+
+            is_present_in_exec_move = self.node in current_nodes_in_executor
+            if not is_present_in_exec_move:
                 self.logger.warning(
-                    f"Node '{self.node.get_name()}' is NOT in the provided executor's list of managed nodes. "
+                    f"Node '{self.node.get_name()}' (id: {id(self.node)}) is NOT IN the provided executor's (id: {id(self.executor)}) list of managed nodes. "
                     "Callbacks for this node might not be processed by this executor instance."
                 )
             else:
                 self.logger.info(
-                    f"Node '{self.node.get_name()}' IS in the provided executor's list of managed nodes."
+                    f"Node '{self.node.get_name()}' (id: {id(self.node)}) IS IN the provided executor's (id: {id(self.executor)}) list of managed nodes."
                 )
         except Exception as e:
-            self.logger.error(f"Failed to check node-executor association: {e}")
+            self.logger.error(f"EXEC_MOVE_PRE_CHECK: Failed to check node-executor association: {e}")
 
         self.action_complete_event.clear()
         self.last_result = None
