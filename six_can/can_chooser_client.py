@@ -42,10 +42,73 @@ class CanChooserClient():
         self.req.choose_can = True  # Set the request to choose a can
         self.logger.info(f"choose_can: Calling service to choose_can")
         self.future = self.client.call_async(self.req)
-        rclpy.spin_until_future_complete(self.node, self.future)
-        response = self.future.result()
-        if response is None:
-            self.logger.error("choose_can: Service call failed or future error: response was None.")
+
+        # --- BEGIN Manual Spin ---
+        # rclpy.spin_until_future_complete(self.node, self.future) # OLD METHOD
+
+        node_executor_ref = self.node.executor
+        if node_executor_ref is None:
+            self.logger.error(
+                f"Node '{self.node.get_name()}' is not associated with an executor. "
+                "Falling back to rclpy.spin_until_future_complete."
+            )
+            # This situation itself would be a symptom if node was expected to be in mt_executor
+            rclpy.spin_until_future_complete(self.node, self.future, timeout_sec=10.0) # Added timeout
+        else:
+            target_executor = node_executor_ref()  # Dereference weakref
+            if target_executor is None:
+                self.logger.error(
+                    f"Node '{self.node.get_name()}'s executor weakref is dead. "
+                    "Falling back to rclpy.spin_until_future_complete."
+                )
+                rclpy.spin_until_future_complete(self.node, self.future, timeout_sec=10.0) # Added timeout
+            else:
+                self.logger.info(
+                    f"CHOOSE_CAN_MANUAL_SPIN: Manually spinning executor (id: {id(target_executor)}, "
+                    f"type: {type(target_executor).__name__}) for node '{self.node.get_name()}'."
+                )
+                try:
+                    nodes_before_spin = target_executor.get_nodes()
+                    node_names_before_spin = [n.get_name() for n in nodes_before_spin]
+                    self.logger.info(
+                        f"CHOOSE_CAN_MANUAL_SPIN_PRE: Executor (id: {id(target_executor)}) nodes: {node_names_before_spin}. "
+                        f"Target node '{self.node.get_name()}' in list: {self.node in nodes_before_spin}"
+                    )
+                except Exception as e_log:
+                    self.logger.warn(f"CHOOSE_CAN_MANUAL_SPIN_PRE: Error logging executor nodes: {e_log}")
+
+                loop_timeout_sec = 10.0  # Timeout for the manual spin loop
+                spin_interval_sec = 0.1   # How often to call spin_once
+                start_time = self.node.get_clock().now()
+                timeout_occurred = False
+
+                while rclpy.ok() and not self.future.done():
+                    current_time = self.node.get_clock().now()
+                    if (current_time - start_time).nanoseconds / 1e9 > loop_timeout_sec:
+                        self.logger.warn(
+                            f"CHOOSE_CAN_MANUAL_SPIN: Loop timed out after {loop_timeout_sec}s waiting for future."
+                        )
+                        timeout_occurred = True
+                        break
+                    target_executor.spin_once(timeout_sec=spin_interval_sec)
+                
+                if not self.future.done() and not timeout_occurred and not rclpy.ok():
+                    self.logger.warn("CHOOSE_CAN_MANUAL_SPIN: rclpy.ok() became false during spin.")
+
+                try:
+                    nodes_after_spin = target_executor.get_nodes()
+                    node_names_after_spin = [n.get_name() for n in nodes_after_spin]
+                    self.logger.info(
+                        f"CHOOSE_CAN_MANUAL_SPIN_POST: Executor (id: {id(target_executor)}) nodes: {node_names_after_spin}. "
+                        f"Target node '{self.node.get_name()}' in list: {self.node in nodes_after_spin}"
+                    )
+                except Exception as e_log:
+                    self.logger.warn(f"CHOOSE_CAN_MANUAL_SPIN_POST: Error logging executor nodes: {e_log}")
+        # --- END Manual Spin ---
+
+        response = self.future.result() # This will raise if future is not done or has exception
+        if response is None: # Should only happen if future.result() itself returns None, not on error
+            self.logger.error("choose_can: Service call future.result() returned None.")
         elif not response.can_chosen:
             self.logger.info("choose_can: No can chosen.")
         else:
