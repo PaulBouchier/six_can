@@ -3,6 +3,7 @@ Call the can_chooser service and return the result.
 '''
 import rclpy
 from rclpy.node import Node
+from rclpy.task import Future
 
 from typing import Tuple
 from six_can_interfaces.srv import CanChooserRqst
