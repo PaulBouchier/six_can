@@ -14,14 +14,16 @@ class SingleMoveClient():
     This class encapsulates the logic for sending a goal to a specific move action server
     and waiting for its completion.
     """
-    def __init__(self, node: Node):
+    def __init__(self, node: Node, executor):
         """
         Initializes the SingleMoveClient.
 
         Args:
             node: The ROS 2 Node instance to use for creating action clients and logging.
+            executor: The executor to use for spinning and processing callbacks.
         """
         self.node = node
+        self.executor = executor
         self.logger = node.get_logger()
 
         # Action clients
@@ -90,8 +92,8 @@ class SingleMoveClient():
         # Wait for the action to complete (event set by callbacks)
         self.logger.info(f"Spin in a loop to process callbacks until the event is set")
         while not self.action_complete_event.wait(timeout=0.01):
-            # Need rclpy.spin_once to process callbacks
-            rclpy.spin_once(self.node, timeout_sec=0.1) # Use minimal timeout for responsiveness
+            # Need to spin the executor to process callbacks
+            self.executor.spin_once(timeout_sec=0.1) # Use minimal timeout for responsiveness
 
         self.logger.info(f"Move '{move_type}' finished with status: {self._status_to_string(self.last_status)}")
         return self.last_status == GoalStatus.STATUS_SUCCEEDED

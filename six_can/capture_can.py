@@ -65,7 +65,7 @@ class CaptureCan:
         self.future: Future = None
 
         # Navigation and movement clients
-        self.move_client = SingleMoveClient(self.node)
+        self.move_client = SingleMoveClient(self.node, self.mt_executor)
 
         # State machine variable
         self.capture_sm_state = 'IDLE'
