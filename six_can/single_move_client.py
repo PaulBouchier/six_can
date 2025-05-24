@@ -58,6 +58,21 @@ class SingleMoveClient():
             True if the action succeeded, False otherwise.
         """
         self.logger.info(f"Executing move: {move_type} {move_spec}")
+
+        # Diagnostic check for node-executor association
+        try:
+            if self.node not in self.executor.get_nodes():
+                self.logger.warning(
+                    f"Node '{self.node.get_name()}' is NOT in the provided executor's list of managed nodes. "
+                    "Callbacks for this node might not be processed by this executor instance."
+                )
+            else:
+                self.logger.info(
+                    f"Node '{self.node.get_name()}' IS in the provided executor's list of managed nodes."
+                )
+        except Exception as e:
+            self.logger.error(f"Failed to check node-executor association: {e}")
+
         self.action_complete_event.clear()
         self.last_result = None
         self.last_status = GoalStatus.STATUS_UNKNOWN
