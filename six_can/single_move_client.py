@@ -26,6 +26,32 @@ class SingleMoveClient():
         self.executor = executor
         self.logger = node.get_logger()
 
+        # Ensure the node is managed by the provided executor.
+        # This is crucial for the executor.spin_once() in execute_move to process this node's callbacks.
+        # We check first to avoid issues if the node is already added or if get_nodes() is sensitive.
+        is_node_in_executor = False
+        try:
+            if self.node in self.executor.get_nodes():
+                is_node_in_executor = True
+        except Exception as e:
+            self.logger.warning(f"Could not determine if node is in executor, will attempt to add: {e}")
+
+        if not is_node_in_executor:
+            try:
+                self.executor.add_node(self.node)
+                self.logger.info(
+                    f"Node '{self.node.get_name()}' was added to the provided executor by SingleMoveClient."
+                )
+            except Exception as e:
+                self.logger.error(
+                    f"Failed to add node '{self.node.get_name()}' to executor in SingleMoveClient: {e}. "
+                    "Callbacks may not work."
+                )
+        else:
+            self.logger.info(
+                f"Node '{self.node.get_name()}' is already managed by the provided executor."
+            )
+
         # Action clients
         self.clients = {
             'stop': ActionClient(node, Move, 'stop'),
