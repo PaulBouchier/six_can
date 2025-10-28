@@ -38,6 +38,7 @@ setup(
             'basic_navigator_child = six_can.BasicNavigatorChild:main',
             'test_nav_and_move = test.test_nav_and_move:main',
             'jaws = six_can.jaws:main',
+            'navloop = six_can.navloop:main',
         ],
     },
 )

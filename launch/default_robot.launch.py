@@ -79,10 +79,4 @@ def generate_launch_description():
         IncludeLaunchDescription(
             PythonLaunchDescriptionSource(sensors_launch_path),
         ),
-        Node(
-            package='six_can',
-            executable='can_chooser_node',
-            name='can_chooser',
-            output='screen'
-        )
     ])
